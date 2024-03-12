@@ -9,6 +9,7 @@ defmodule Pachka.MixProject do
       start_permanent: Mix.env() == :prod,
       compilers: compilers(),
       deps: deps(),
+      aliases: aliases(),
       dialyzer: [
         flags: ~w[error_handling extra_return missing_return underspecs unmatched_returns]a
       ]
@@ -35,6 +36,12 @@ defmodule Pachka.MixProject do
     [
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: :dev, runtime: false}
+    ]
+  end
+
+  defp aliases do
+    [
+      check: ["format --check-formatted", "credo", "dialyzer"]
     ]
   end
 end
