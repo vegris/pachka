@@ -49,13 +49,14 @@ defmodule Pachka.Server do
   @impl true
   def init(opts) do
     for name <- [@table_1, @table_2] do
-      :ets.new(name, [
-        :duplicate_bag,
-        :public,
-        :named_table,
-        {:heir, self(), nil},
-        write_concurrency: true
-      ])
+      _ =
+        :ets.new(name, [
+          :duplicate_bag,
+          :public,
+          :named_table,
+          {:heir, self(), nil},
+          write_concurrency: true
+        ])
     end
 
     :persistent_term.put(@current_table_key, @table_1)
@@ -124,6 +125,7 @@ defmodule Pachka.Server do
     case reason do
       :normal ->
         _ = Process.cancel_timer(state.export_timer)
+        :ok
 
       :killed ->
         :ok
