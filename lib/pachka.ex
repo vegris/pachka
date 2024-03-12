@@ -1,18 +1,5 @@
 defmodule Pachka do
-  @moduledoc """
-  Documentation for `Pachka`.
-  """
+  @type message :: term()
 
-  @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> Pachka.hello()
-      :world
-
-  """
-  def hello do
-    :world
-  end
+  defdelegate send_message(message), to: Pachka.Server
 end
