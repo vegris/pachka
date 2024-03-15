@@ -6,24 +6,59 @@ defmodule Pachka.Server do
   defmodule State do
     @type t :: %__MODULE__{
             handler: module(),
-            send_timer: reference(),
-            check_timer: reference(),
-            export_timer: reference(),
-            export_ref: reference(),
-            export_pid: pid()
+            state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
+            check_timer: reference()
           }
 
-    @enforce_keys [:handler]
-    defstruct @enforce_keys ++ ~w[send_timer check_timer export_timer export_ref export_pid]a
+    @enforce_keys ~w[handler state check_timer]a
+    defstruct @enforce_keys
   end
+
+  defmodule State.Idle do
+    @type t :: %__MODULE__{
+            batch_timer: reference()
+          }
+
+    @enforce_keys [:batch_timer]
+    defstruct @enforce_keys
+  end
+
+  defmodule State.Exporting do
+    @type t :: %__MODULE__{
+            export_timer: reference(),
+            export_pid: pid(),
+            export_monitor: reference(),
+            process_down_reason: nil | :normal | :killed,
+            table_inherited?: boolean(),
+            retry_num: non_neg_integer()
+          }
+
+    @enforce_keys ~w[export_timer export_pid export_monitor]a
+    defstruct @enforce_keys ++ [:process_down_reason, table_inherited?: false, retry_num: 0]
+  end
+
+  defmodule State.RetryBackoff do
+    @type t :: %__MODULE__{
+            retry_num: non_neg_integer(),
+            retry_timer: reference()
+          }
+
+    @enforce_keys ~w[retry_num retry_timer]a
+    defstruct @enforce_keys
+  end
+
+  alias State, as: S
+  alias State.{Idle, Exporting, RetryBackoff}
+
+  @timer Pachka.Timer.implementation()
 
   @max_batch_size 500
   @critical_batch_size 10_000
   @max_batch_delay :timer.seconds(5)
 
-  @check_timout :timer.seconds(1)
-
+  @check_timeout :timer.seconds(1)
   @export_timeout :timer.seconds(10)
+  @retry_timeout :timer.seconds(1)
 
   @table_1 :"#{__MODULE__}.Table1"
   @table_2 :"#{__MODULE__}.Table2"
@@ -46,6 +81,10 @@ defmodule Pachka.Server do
     end
   end
 
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
   @impl true
   def init(opts) do
     for name <- [@table_1, @table_2] do
@@ -62,81 +101,171 @@ defmodule Pachka.Server do
     :persistent_term.put(@current_table_key, @table_1)
     :persistent_term.put(@current_table_status_key, :available)
 
-    state = %State{
+    state = %S{
       handler: Keyword.fetch!(opts, :handler),
-      send_timer: Process.send_after(self(), :batch_timeout, @max_batch_delay),
-      check_timer: Process.send_after(self(), :check_timeout, @check_timout)
+      state: %Idle{batch_timer: set_batch_timer()},
+      check_timer: set_check_timer()
     }
 
     {:ok, state}
   end
 
   @impl true
-  def handle_info(:batch_timeout, %State{} = state) do
+  def handle_info(msg, %S{} = state) do
     state =
-      if is_nil(state.export_ref) and current_table_size() > 0 do
-        export_batch(state)
-      else
-        state
+      case msg do
+        :batch_timeout ->
+          handle_batch_timeout(state)
+
+        :check_timeout ->
+          handle_check_timeout(state)
+
+        {:export_timeout, export_pid} ->
+          handle_export_timeout(state, export_pid)
+
+        {:"ETS-TRANSFER", table, from_pid, _heir_data} ->
+          handle_ets_transfer(state, table, from_pid)
+
+        {:DOWN, ref, :process, pid, reason} ->
+          handle_process_down(state, ref, pid, reason)
+
+        :retry_timeout ->
+          handle_retry_timeout(state)
       end
 
     {:noreply, state}
   end
 
-  def handle_info(:check_timeout, %State{} = state) do
+  @impl true
+  def terminate(_reason, _state) do
+    for name <- [@table_1, @table_2] do
+      :ets.delete(name)
+    end
+
+    :ok
+  end
+
+  defp handle_batch_timeout(%S{state: %Idle{}} = state) do
+    %State{state | state: export_batch(state.handler, switch_tables())}
+  end
+
+  defp handle_batch_timeout(%S{state: s} = state) do
+    Logger.warning("Received batch timeout in wrong state", state: s.__struct__)
+
+    state
+  end
+
+  defp handle_check_timeout(%S{state: s} = state) do
     table_size = current_table_size()
 
-    state =
-      cond do
-        is_nil(state.export_ref) and table_size >= @max_batch_size ->
-          export_batch(state)
-
-        is_reference(state.export_ref) and table_size >= @critical_batch_size ->
-          :persistent_term.put(@current_table_status_key, :overloaded)
+    cond do
+      is_struct(s, Idle) and table_size >= @max_batch_size ->
+        %S{
           state
+          | state: export_batch(state.handler, switch_tables()),
+            check_timer: set_check_timer()
+        }
 
-        :otherwise ->
-          state
+      table_size >= @critical_batch_size ->
+        :persistent_term.put(@current_table_status_key, :overloaded)
+
+        %S{state | check_timer: nil}
+
+      :otherwise ->
+        %S{state | check_timer: set_check_timer()}
+    end
+  end
+
+  defp handle_export_timeout(%S{state: %Exporting{} = e} = state, export_pid) do
+    if export_pid == e.export_pid do
+      Process.exit(e.export_pid, :kill)
+    else
+      Logger.warning("Received export timeout for old process",
+        old_pid: export_pid,
+        current_pid: e.export_pid
+      )
+    end
+
+    state
+  end
+
+  defp handle_export_timeout(%S{state: s} = state, export_pid) do
+    Logger.warning("Received export timeout in wrong state",
+      state: s.__struct__,
+      export_pid: export_pid
+    )
+
+    state
+  end
+
+  defp handle_ets_transfer(%S{state: %Exporting{} = e} = state, table, from_pid) do
+    Logger.debug("Inherited table from late process", table: table, process: from_pid)
+
+    %Exporting{e | table_inherited?: true}
+    |> then(&%S{state | state: &1})
+    |> maybe_finish_exporting()
+  end
+
+  defp handle_process_down(%S{state: %Exporting{} = e} = state, ref, pid, reason) do
+    Logger.debug("Received process DOWN message", pid: pid, ref: ref, reason: reason)
+
+    %Exporting{e | process_down_reason: reason}
+    |> then(&%S{state | state: &1})
+    |> maybe_finish_exporting()
+  end
+
+  defp handle_retry_timeout(%S{state: %RetryBackoff{} = r} = state) do
+    inactive_table =
+      case :persistent_term.get(@current_table_key) do
+        @table_1 -> @table_2
+        @table_2 -> @table_1
       end
 
-    {:noreply, state}
+    state.handler
+    |> export_batch(inactive_table)
+    |> then(fn %Exporting{} = e ->
+      %Exporting{e | retry_num: r.retry_num}
+    end)
+    |> then(&%S{state | state: &1})
   end
 
-  def handle_info({:export_timeout, ref}, %State{} = state) do
-    if ref == state.export_ref do
-      Process.exit(state.export_pid, :kill)
+  defp maybe_finish_exporting(%S{state: %Exporting{} = e} = state) do
+    if e.table_inherited? and e.process_down_reason != nil do
+      _ = @timer.cancel_timer(e.export_timer)
+      finish_exporting(state, e.process_down_reason)
     else
-      Logger.warning("Received export timeout for finished process", monitor_ref: ref)
+      state
     end
-
-    {:noreply, state}
   end
 
-  def handle_info({:"ETS-TRANSFER", table, from_pid, _heir_data}, state) do
-    Logger.debug("Inherited table from late process", table: table, process: from_pid)
-    :ets.delete_all_objects(table)
-    {:noreply, state}
+  defp finish_exporting(%S{} = state, :normal) do
+    next_s =
+      if current_table_size() >= @max_batch_size do
+        export_batch(state.handler, switch_tables())
+      else
+        %Idle{batch_timer: set_batch_timer()}
+      end
+
+    check_timer =
+      if state.check_timer == nil do
+        set_check_timer()
+      else
+        state.check_timer
+      end
+
+    %S{state | state: next_s, check_timer: check_timer}
   end
 
-  def handle_info(
-        {:DOWN, ref, :process, pid, reason},
-        %State{export_ref: ref, export_pid: pid} = state
-      ) do
-    case reason do
-      :normal ->
-        _ = Process.cancel_timer(state.export_timer)
-        :ok
+  defp finish_exporting(%S{state: %Exporting{} = e} = state, :killed) do
+    r = %RetryBackoff{
+      retry_num: e.retry_num + 1,
+      retry_timer: @timer.send_after(self(), :retry_timeout, @retry_timeout)
+    }
 
-      :killed ->
-        :ok
-    end
-
-    {:noreply, %State{state | export_pid: nil, export_ref: nil, export_timer: nil}}
+    %S{state | state: r}
   end
 
-  defp export_batch(%State{} = state) do
-    old_table = switch_tables()
-
+  defp export_batch(handler, table) do
     {pid, monitor_ref} =
       spawn_monitor(fn ->
         receive do
@@ -145,16 +274,20 @@ defmodule Pachka.Server do
 
             table
             |> :ets.tab2list()
-            |> Keyword.fetch!(:batch)
+            |> Enum.map(fn {:batch, value} -> value end)
             |> then(&handler.send_batch/1)
+
+            :ets.delete_all_objects(table)
         end
       end)
 
-    :ets.give_away(old_table, pid, state.handler)
+    :ets.give_away(table, pid, handler)
 
-    export_timer = Process.send_after(self(), {:export_timeout, monitor_ref}, @export_timeout)
-
-    %State{state | export_pid: pid, export_ref: monitor_ref, export_timer: export_timer}
+    %Exporting{
+      export_timer: @timer.send_after(self(), {:export_timeout, pid}, @export_timeout),
+      export_pid: pid,
+      export_monitor: monitor_ref
+    }
   end
 
   defp current_table_size do
@@ -164,17 +297,25 @@ defmodule Pachka.Server do
   end
 
   defp switch_tables do
-    old_table = :persistent_term.get(@current_table_key)
+    current_table = :persistent_term.get(@current_table_key)
 
-    new_table =
-      case old_table do
+    inactive_table =
+      case current_table do
         @table_1 -> @table_2
         @table_2 -> @table_1
       end
 
-    :persistent_term.put(@current_table_key, new_table)
+    :persistent_term.put(@current_table_key, inactive_table)
     :persistent_term.put(@current_table_status_key, :available)
 
-    old_table
+    current_table
+  end
+
+  defp set_check_timer do
+    @timer.send_after(self(), :check_timeout, @check_timeout)
+  end
+
+  defp set_batch_timer do
+    @timer.send_after(self(), :batch_timeout, @max_batch_delay)
   end
 end

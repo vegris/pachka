@@ -7,7 +7,8 @@ defmodule Pachka.MixProject do
       version: "0.1.0",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
-      compilers: compilers(),
+      compilers: compilers(Mix.env()),
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
       dialyzer: [
@@ -23,19 +24,18 @@ defmodule Pachka.MixProject do
     ]
   end
 
-  defp compilers do
-    if Mix.env() == :dev do
-      [:leex, :yecc] ++ Mix.compilers()
-    else
-      Mix.compilers()
-    end
-  end
+  defp compilers(:dev), do: [:leex, :yecc] ++ Mix.compilers()
+  defp compilers(_), do: Mix.compilers()
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
-      {:credo, "~> 1.7", only: :dev, runtime: false}
+      {:credo, "~> 1.7", only: :dev, runtime: false},
+      {:mox, "~> 1.1", only: :test}
     ]
   end
 
