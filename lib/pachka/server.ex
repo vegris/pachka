@@ -130,15 +130,6 @@ defmodule Pachka.Server do
     {:noreply, state}
   end
 
-  @impl true
-  def terminate(_reason, _state) do
-    for name <- [@table_1, @table_2] do
-      :ets.delete(name)
-    end
-
-    :ok
-  end
-
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
     %State{state | state: export_batch(state.handler, switch_tables())}
   end
