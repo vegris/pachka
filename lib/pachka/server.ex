@@ -28,13 +28,11 @@ defmodule Pachka.Server do
             export_timer: reference(),
             export_pid: pid(),
             export_monitor: reference(),
-            process_down_reason: nil | :normal | :killed,
-            table_inherited?: boolean(),
             retry_num: non_neg_integer()
           }
 
     @enforce_keys ~w[export_timer export_pid export_monitor]a
-    defstruct @enforce_keys ++ [:process_down_reason, table_inherited?: false, retry_num: 0]
+    defstruct @enforce_keys ++ [retry_num: 0]
   end
 
   defmodule State.RetryBackoff do
@@ -93,7 +91,6 @@ defmodule Pachka.Server do
           :duplicate_bag,
           :public,
           :named_table,
-          {:heir, self(), nil},
           write_concurrency: true
         ])
     end
@@ -122,9 +119,6 @@ defmodule Pachka.Server do
 
         {:export_timeout, export_pid} ->
           handle_export_timeout(state, export_pid)
-
-        {:"ETS-TRANSFER", table, from_pid, _heir_data} ->
-          handle_ets_transfer(state, table, from_pid)
 
         {:DOWN, ref, :process, pid, reason} ->
           handle_process_down(state, ref, pid, reason)
@@ -198,20 +192,12 @@ defmodule Pachka.Server do
     state
   end
 
-  defp handle_ets_transfer(%S{state: %Exporting{} = e} = state, table, from_pid) do
-    Logger.debug("Inherited table from late process", table: table, process: from_pid)
-
-    %Exporting{e | table_inherited?: true}
-    |> then(&%S{state | state: &1})
-    |> maybe_finish_exporting()
-  end
-
   defp handle_process_down(%S{state: %Exporting{} = e} = state, ref, pid, reason) do
     Logger.debug("Received process DOWN message", pid: pid, ref: ref, reason: reason)
 
-    %Exporting{e | process_down_reason: reason}
-    |> then(&%S{state | state: &1})
-    |> maybe_finish_exporting()
+    _ = @timer.cancel_timer(e.export_timer)
+
+    finish_exporting(state, reason)
   end
 
   defp handle_retry_timeout(%S{state: %RetryBackoff{} = r} = state) do
@@ -227,15 +213,6 @@ defmodule Pachka.Server do
       %Exporting{e | retry_num: r.retry_num}
     end)
     |> then(&%S{state | state: &1})
-  end
-
-  defp maybe_finish_exporting(%S{state: %Exporting{} = e} = state) do
-    if e.table_inherited? and e.process_down_reason != nil do
-      _ = @timer.cancel_timer(e.export_timer)
-      finish_exporting(state, e.process_down_reason)
-    else
-      state
-    end
   end
 
   defp finish_exporting(%S{} = state, :normal) do
@@ -268,20 +245,15 @@ defmodule Pachka.Server do
   defp export_batch(handler, table) do
     {pid, monitor_ref} =
       spawn_monitor(fn ->
-        receive do
-          {:"ETS-TRANSFER", table, owner_pid, handler} ->
-            Logger.debug("Received table from server", table: table, server: owner_pid)
+        Logger.debug("Starting batch export", table: table)
 
-            table
-            |> :ets.tab2list()
-            |> Enum.map(fn {:batch, value} -> value end)
-            |> then(&handler.send_batch/1)
+        table
+        |> :ets.tab2list()
+        |> Enum.map(fn {:batch, value} -> value end)
+        |> then(&handler.send_batch/1)
 
-            :ets.delete_all_objects(table)
-        end
+        :ets.delete_all_objects(table)
       end)
-
-    :ets.give_away(table, pid, handler)
 
     %Exporting{
       export_timer: @timer.send_after(self(), {:export_timeout, pid}, @export_timeout),
