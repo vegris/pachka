@@ -5,12 +5,14 @@ defmodule Pachka.Server do
 
   defmodule State do
     @type t :: %__MODULE__{
+            name: atom(),
             handler: module(),
             state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
-            check_timer: reference()
+            check_timer: reference(),
+            tables: {:ets.tid(), :ets.tid()}
           }
 
-    @enforce_keys ~w[handler state check_timer]a
+    @enforce_keys ~w[name handler state check_timer tables]a
     defstruct @enforce_keys
   end
 
@@ -58,24 +60,18 @@ defmodule Pachka.Server do
   @export_timeout :timer.seconds(10)
   @retry_timeout :timer.seconds(1)
 
-  @table_1 :"#{__MODULE__}.Table1"
-  @table_2 :"#{__MODULE__}.Table2"
+  @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
+  def send_message(name, message) do
+    [{:current_table, table, status}] = :ets.lookup(name, :current_table)
 
-  @current_table_key {__MODULE__, :current_table}
-  @current_table_status_key {__MODULE__, :current_table_status}
+    case status do
+      :available ->
+        :ets.insert(table, {:batch, message})
 
-  @spec send_message(Pachka.message()) :: :ok | {:error, :overloaded}
-  def send_message(message) do
-    status = :persistent_term.get(@current_table_status_key)
+        :ok
 
-    if status == :available do
-      @current_table_key
-      |> :persistent_term.get()
-      |> :ets.insert({:batch, message})
-
-      :ok
-    else
-      {:error, status}
+      :overloaded ->
+        {:error, :overloaded}
     end
   end
 
@@ -85,23 +81,24 @@ defmodule Pachka.Server do
 
   @impl true
   def init(opts) do
-    for name <- [@table_1, @table_2] do
-      _ =
-        :ets.new(name, [
-          :duplicate_bag,
-          :public,
-          :named_table,
-          write_concurrency: true
-        ])
-    end
+    name = Keyword.fetch!(opts, :name)
 
-    :persistent_term.put(@current_table_key, @table_1)
-    :persistent_term.put(@current_table_status_key, :available)
+    tables =
+      1..2
+      |> Enum.map(fn i ->
+        :ets.new(:"#{name}.ExportTable#{i}", [:duplicate_bag, :public, write_concurrency: true])
+      end)
+      |> List.to_tuple()
+
+    _ = :ets.new(name, [:set, :protected, :named_table, read_concurrency: true])
+    :ets.insert(name, {:current_table, elem(tables, 0), :available})
 
     state = %S{
+      name: name,
       handler: Keyword.fetch!(opts, :handler),
       state: %Idle{batch_timer: set_batch_timer()},
-      check_timer: set_check_timer()
+      check_timer: set_check_timer(),
+      tables: tables
     }
 
     {:ok, state}
@@ -131,7 +128,7 @@ defmodule Pachka.Server do
   end
 
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
-    %State{state | state: export_batch(state.handler, switch_tables())}
+    %State{state | state: export_batch(state.handler, switch_tables(state.name, state.tables))}
   end
 
   defp handle_batch_timeout(%S{state: s} = state) do
@@ -141,18 +138,18 @@ defmodule Pachka.Server do
   end
 
   defp handle_check_timeout(%S{state: s} = state) do
-    table_size = current_table_size()
+    table_size = current_table_size(state.name)
 
     cond do
       is_struct(s, Idle) and table_size >= @max_batch_size ->
         %S{
           state
-          | state: export_batch(state.handler, switch_tables()),
+          | state: export_batch(state.handler, switch_tables(state.name, state.tables)),
             check_timer: set_check_timer()
         }
 
       table_size >= @critical_batch_size ->
-        :persistent_term.put(@current_table_status_key, :overloaded)
+        true = :ets.update_element(state.name, :current_table, {3, :overloaded})
 
         %S{state | check_timer: nil}
 
@@ -192,10 +189,12 @@ defmodule Pachka.Server do
   end
 
   defp handle_retry_timeout(%S{state: %RetryBackoff{} = r} = state) do
+    {table_1, table_2} = state.tables
+
     inactive_table =
-      case :persistent_term.get(@current_table_key) do
-        @table_1 -> @table_2
-        @table_2 -> @table_1
+      case :ets.lookup_element(state.name, :current_table, 2) do
+        ^table_1 -> table_2
+        ^table_2 -> table_1
       end
 
     state.handler
@@ -208,8 +207,8 @@ defmodule Pachka.Server do
 
   defp finish_exporting(%S{} = state, :normal) do
     next_s =
-      if current_table_size() >= @max_batch_size do
-        export_batch(state.handler, switch_tables())
+      if current_table_size(state.name) >= @max_batch_size do
+        export_batch(state.handler, switch_tables(state.name, state.tables))
       else
         %Idle{batch_timer: set_batch_timer()}
       end
@@ -253,23 +252,24 @@ defmodule Pachka.Server do
     }
   end
 
-  defp current_table_size do
-    @current_table_key
-    |> :persistent_term.get()
+  defp current_table_size(name) do
+    name
+    |> :ets.lookup_element(:current_table, 2)
     |> :ets.info(:size)
   end
 
-  defp switch_tables do
-    current_table = :persistent_term.get(@current_table_key)
+  defp switch_tables(name, tables) do
+    current_table = :ets.lookup_element(name, :current_table, 2)
+
+    {table_1, table_2} = tables
 
     inactive_table =
       case current_table do
-        @table_1 -> @table_2
-        @table_2 -> @table_1
+        ^table_1 -> table_2
+        ^table_2 -> table_1
       end
 
-    :persistent_term.put(@current_table_key, inactive_table)
-    :persistent_term.put(@current_table_status_key, :available)
+    :ets.insert(name, {:current_table, inactive_table, :available})
 
     current_table
   end

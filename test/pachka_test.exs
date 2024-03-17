@@ -21,16 +21,21 @@ defmodule PachkaTest do
   end
 
   defp start_server(_context) do
-    pid = start_link_supervised!({Pachka.Server, handler: SendHandler})
+    name = server_name()
+    pid = start_link_supervised!({Pachka.Server, name: name, handler: SendHandler})
 
-    %{server_pid: pid}
+    %{name: name, pid: pid}
   end
 
-  test "collects and sends batches", %{server_pid: pid} do
+  defp server_name do
+    :"#{Pachka.Server}_#{System.unique_integer()}"
+  end
+
+  test "collects and sends batches", %{name: name, pid: pid} do
     for _step <- 1..5 do
       messages =
         for i <- 1..500 do
-          :ok = Pachka.send_message(i)
+          :ok = Pachka.send_message(name, i)
           i
         end
 
@@ -40,34 +45,34 @@ defmodule PachkaTest do
     end
   end
 
-  test "blocks writes on overload", %{server_pid: pid} do
+  test "blocks writes on overload", %{name: name, pid: pid} do
     SendHandler.set_blocking?(true)
 
     for i <- 1..15_000 do
-      :ok = Pachka.send_message(i)
+      :ok = Pachka.send_message(name, i)
     end
 
     send(pid, :check_timeout)
     assert_receive {:batch, _messages}
 
     for i <- 1..15_000 do
-      :ok = Pachka.send_message(i)
+      :ok = Pachka.send_message(name, i)
     end
 
     send(pid, :check_timeout)
     refute_receive {:batch, _messages}
 
     for i <- 1..10 do
-      assert {:error, :overloaded} = Pachka.send_message(i)
+      assert {:error, :overloaded} = Pachka.send_message(name, i)
     end
   end
 
-  test "kills exporting process on timeout without losing messages", %{server_pid: pid} do
+  test "kills exporting process on timeout without losing messages", %{name: name, pid: pid} do
     SendHandler.set_blocking?(true)
 
     batch_1 =
       for i <- 1..500 do
-        :ok = Pachka.send_message(i)
+        :ok = Pachka.send_message(name, i)
         i
       end
 
@@ -76,7 +81,7 @@ defmodule PachkaTest do
 
     batch_2 =
       for i <- 500..1000 do
-        :ok = Pachka.send_message(i)
+        :ok = Pachka.send_message(name, i)
         i
       end
 
