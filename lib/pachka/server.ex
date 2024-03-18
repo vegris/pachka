@@ -3,13 +3,15 @@ defmodule Pachka.Server do
 
   require Logger
 
+  alias __MODULE__.Tables
+
   defmodule State do
     @type t :: %__MODULE__{
             name: atom(),
             handler: module(),
             state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
             check_timer: reference(),
-            tables: {:ets.tid(), :ets.tid()}
+            tables: Tables.t()
           }
 
     @enforce_keys ~w[name handler state check_timer tables]a
@@ -84,17 +86,7 @@ defmodule Pachka.Server do
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
 
-    tables =
-      1..2
-      |> Enum.map(fn i ->
-        table = :ets.new(:"#{name}.ExportTable#{i}", [:set, :public, write_concurrency: true])
-        :ets.insert(table, {:counter, 0})
-        table
-      end)
-      |> List.to_tuple()
-
-    _ = :ets.new(name, [:set, :protected, :named_table, read_concurrency: true])
-    :ets.insert(name, {:current_table, elem(tables, 0), :available})
+    tables = Tables.create(name)
 
     state = %S{
       name: name,
@@ -131,7 +123,8 @@ defmodule Pachka.Server do
   end
 
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
-    %State{state | state: export_batch(state.handler, switch_tables(state.name, state.tables))}
+    inactive_table = Tables.switch_active(state.name, state.tables)
+    %State{state | state: export_batch(state.handler, inactive_table)}
   end
 
   defp handle_batch_timeout(%S{state: s} = state) do
@@ -141,13 +134,15 @@ defmodule Pachka.Server do
   end
 
   defp handle_check_timeout(%S{state: s} = state) do
-    table_size = current_table_size(state.name)
+    table_size = Tables.active_size(state.name)
 
     cond do
       is_struct(s, Idle) and table_size >= @max_batch_size ->
+        inactive_table = Tables.switch_active(state.name, state.tables)
+
         %S{
           state
-          | state: export_batch(state.handler, switch_tables(state.name, state.tables)),
+          | state: export_batch(state.handler, inactive_table),
             check_timer: set_check_timer()
         }
 
@@ -188,29 +183,14 @@ defmodule Pachka.Server do
 
     _ = @timer.cancel_timer(e.export_timer)
 
-    current_table = :ets.lookup_element(state.name, :current_table, 2)
-
-    {table_1, table_2} = state.tables
-
-    inactive_table =
-      case current_table do
-        ^table_1 -> table_2
-        ^table_2 -> table_1
-      end
-
+    inactive_table = Tables.inactive_table(state.name, state.tables)
     :ets.insert(inactive_table, {:counter, 0})
 
     finish_exporting(state, reason)
   end
 
   defp handle_retry_timeout(%S{state: %RetryBackoff{} = r} = state) do
-    {table_1, table_2} = state.tables
-
-    inactive_table =
-      case :ets.lookup_element(state.name, :current_table, 2) do
-        ^table_1 -> table_2
-        ^table_2 -> table_1
-      end
+    inactive_table = Tables.inactive_table(state.name, state.tables)
 
     state.handler
     |> export_batch(inactive_table)
@@ -222,8 +202,9 @@ defmodule Pachka.Server do
 
   defp finish_exporting(%S{} = state, :normal) do
     next_s =
-      if current_table_size(state.name) >= @max_batch_size do
-        export_batch(state.handler, switch_tables(state.name, state.tables))
+      if Tables.active_size(state.name) >= @max_batch_size do
+        inactive_table = Tables.switch_active(state.name, state.tables)
+        export_batch(state.handler, inactive_table)
       else
         %Idle{batch_timer: set_batch_timer()}
       end
@@ -268,28 +249,6 @@ defmodule Pachka.Server do
       export_pid: pid,
       export_monitor: monitor_ref
     }
-  end
-
-  defp current_table_size(name) do
-    name
-    |> :ets.lookup_element(:current_table, 2)
-    |> :ets.info(:size)
-  end
-
-  defp switch_tables(name, tables) do
-    current_table = :ets.lookup_element(name, :current_table, 2)
-
-    {table_1, table_2} = tables
-
-    inactive_table =
-      case current_table do
-        ^table_1 -> table_2
-        ^table_2 -> table_1
-      end
-
-    :ets.insert(name, {:current_table, inactive_table, :available})
-
-    current_table
   end
 
   defp set_check_timer do
