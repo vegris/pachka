@@ -66,7 +66,8 @@ defmodule Pachka.Server do
 
     case status do
       :available ->
-        :ets.insert(table, {:batch, message})
+        index = :ets.update_counter(table, :counter, 1)
+        :ets.insert(table, {index, message})
 
         :ok
 
@@ -86,7 +87,9 @@ defmodule Pachka.Server do
     tables =
       1..2
       |> Enum.map(fn i ->
-        :ets.new(:"#{name}.ExportTable#{i}", [:duplicate_bag, :public, write_concurrency: true])
+        table = :ets.new(:"#{name}.ExportTable#{i}", [:set, :public, write_concurrency: true])
+        :ets.insert(table, {:counter, 0})
+        table
       end)
       |> List.to_tuple()
 
@@ -185,6 +188,18 @@ defmodule Pachka.Server do
 
     _ = @timer.cancel_timer(e.export_timer)
 
+    current_table = :ets.lookup_element(state.name, :current_table, 2)
+
+    {table_1, table_2} = state.tables
+
+    inactive_table =
+      case current_table do
+        ^table_1 -> table_2
+        ^table_2 -> table_1
+      end
+
+    :ets.insert(inactive_table, {:counter, 0})
+
     finish_exporting(state, reason)
   end
 
@@ -237,9 +252,12 @@ defmodule Pachka.Server do
       spawn_monitor(fn ->
         Logger.debug("Starting batch export", table: table)
 
+        :ets.delete(table, :counter)
+
         table
         |> :ets.tab2list()
-        |> Enum.map(fn {:batch, value} -> value end)
+        |> List.keysort(0)
+        |> Enum.map(fn {_index, value} -> value end)
         |> then(&handler.send_batch/1)
 
         :ets.delete_all_objects(table)
