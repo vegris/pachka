@@ -17,22 +17,6 @@ defmodule Pachka.Server do
   @export_timeout :timer.seconds(10)
   @retry_timeout :timer.seconds(1)
 
-  @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
-  def send_message(name, message) do
-    [{:current_table, table, status}] = :ets.lookup(name, :current_table)
-
-    case status do
-      :available ->
-        index = :ets.update_counter(table, :counter, 1)
-        :ets.insert(table, {index, message})
-
-        :ok
-
-      :overloaded ->
-        {:error, :overloaded}
-    end
-  end
-
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end

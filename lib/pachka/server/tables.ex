@@ -18,6 +18,22 @@ defmodule Pachka.Server.Tables do
     tables
   end
 
+  @spec write_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
+  def write_message(name, message) do
+    [{:current_table, table, status}] = :ets.lookup(name, :current_table)
+
+    case status do
+      :available ->
+        index = :ets.update_counter(table, :counter, 1)
+        :ets.insert(table, {index, message})
+
+        :ok
+
+      :overloaded ->
+        {:error, :overloaded}
+    end
+  end
+
   @spec active_size(atom()) :: integer()
   def active_size(name) do
     name
