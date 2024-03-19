@@ -144,11 +144,9 @@ defmodule Pachka.Server do
   end
 
   defp finish_exporting(%S{} = state, :normal) do
-    _inactive_table =
-      state.name
-      |> Tables.inactive_table(state.tables)
-      |> tap(&:ets.delete_all_objects/1)
-      |> tap(&Tables.reset_counter/1)
+    state.name
+    |> Tables.inactive_table(state.tables)
+    |> Tables.reset_table()
 
     next_s =
       if Tables.active_size(state.name) >= @max_batch_size do
@@ -183,12 +181,8 @@ defmodule Pachka.Server do
         Logger.debug("Starting batch export", table: table)
 
         table
-        |> :ets.tab2list()
-        |> List.keysort(0)
-        # remove counter value
-        |> tl()
-        |> Enum.map(fn {_index, value} -> value end)
-        |> then(&handler.send_batch/1)
+        |> Tables.to_list()
+        |> handler.send_batch()
       end)
 
     %Exporting{
