@@ -45,6 +45,29 @@ defmodule PachkaTest do
     end
   end
 
+  test "does not start export when table is empty", %{name: name, pid: pid} do
+    send(pid, :batch_timeout)
+    refute_receive {:batch, _messages}
+
+    send(pid, :check_timeout)
+    refute_receive {:batch, _messages}
+
+    messages =
+      for i <- 1..5_000 do
+        :ok = Pachka.send_message(name, i)
+        i
+      end
+
+    send(pid, :batch_timeout)
+    assert_receive {:batch, ^messages}
+
+    send(pid, :batch_timeout)
+    refute_receive {:batch, _messages}
+
+    send(pid, :check_timeout)
+    refute_receive {:batch, _messages}
+  end
+
   test "blocks writes on overload", %{name: name, pid: pid} do
     SendHandler.set_blocking?(true)
 
