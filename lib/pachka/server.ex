@@ -62,8 +62,15 @@ defmodule Pachka.Server do
   end
 
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
-    inactive_table = Tables.switch_active(state.name, state.tables)
-    %S{state | state: export_batch(state.handler, inactive_table)}
+    s =
+      if Tables.active_size(state.name) > 0 do
+        inactive_table = Tables.switch_active(state.name, state.tables)
+        export_batch(state.handler, inactive_table)
+      else
+        %Idle{batch_timer: set_batch_timer()}
+      end
+
+    %S{state | state: s}
   end
 
   defp handle_batch_timeout(%S{state: s} = state) do
@@ -122,9 +129,6 @@ defmodule Pachka.Server do
 
     _ = @timer.cancel_timer(e.export_timer)
 
-    inactive_table = Tables.inactive_table(state.name, state.tables)
-    :ets.insert(inactive_table, {:counter, 0})
-
     finish_exporting(state, reason)
   end
 
@@ -140,6 +144,12 @@ defmodule Pachka.Server do
   end
 
   defp finish_exporting(%S{} = state, :normal) do
+    _inactive_table =
+      state.name
+      |> Tables.inactive_table(state.tables)
+      |> tap(&:ets.delete_all_objects/1)
+      |> tap(&Tables.reset_counter/1)
+
     next_s =
       if Tables.active_size(state.name) >= @max_batch_size do
         inactive_table = Tables.switch_active(state.name, state.tables)
@@ -172,15 +182,13 @@ defmodule Pachka.Server do
       spawn_monitor(fn ->
         Logger.debug("Starting batch export", table: table)
 
-        :ets.delete(table, :counter)
-
         table
         |> :ets.tab2list()
         |> List.keysort(0)
+        # remove counter value
+        |> tl()
         |> Enum.map(fn {_index, value} -> value end)
         |> then(&handler.send_batch/1)
-
-        :ets.delete_all_objects(table)
       end)
 
     %Exporting{

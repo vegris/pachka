@@ -1,6 +1,10 @@
 defmodule Pachka.Server.Tables do
   @type t :: {:ets.tid(), :ets.tid()}
 
+  # Use negative integer as counter key
+  # so that counter value will be at the head of the list after sorting for quick removal
+  @counter_key -1
+
   @spec create(atom()) :: t()
   def create(name) do
     tables =
@@ -8,7 +12,7 @@ defmodule Pachka.Server.Tables do
       |> Enum.map(fn i ->
         :"#{name}.ExportTable#{i}"
         |> :ets.new([:set, :public, write_concurrency: true])
-        |> tap(&:ets.insert(&1, {:counter, 0}))
+        |> tap(&reset_counter/1)
       end)
       |> List.to_tuple()
 
@@ -24,7 +28,7 @@ defmodule Pachka.Server.Tables do
 
     case status do
       :available ->
-        index = :ets.update_counter(table, :counter, 1)
+        index = :ets.update_counter(table, @counter_key, 1)
         :ets.insert(table, {index, message})
 
         :ok
@@ -36,9 +40,17 @@ defmodule Pachka.Server.Tables do
 
   @spec active_size(atom()) :: integer()
   def active_size(name) do
-    name
-    |> active_table()
-    |> :ets.info(:size)
+    size =
+      name
+      |> active_table()
+      |> :ets.info(:size)
+      # adjust for counter value
+      |> Kernel.-(1)
+
+    # make Dialyzer happy
+    true = is_integer(size)
+
+    size
   end
 
   @spec switch_active(atom(), t()) :: :ets.tid()
@@ -66,6 +78,12 @@ defmodule Pachka.Server.Tables do
       ^table_1 -> table_2
       ^table_2 -> table_1
     end
+  end
+
+  @spec reset_counter(:ets.tid()) :: :ok
+  def reset_counter(table) do
+    :ets.insert(table, {@counter_key, 0})
+    :ok
   end
 
   defp active_table(name), do: :ets.lookup_element(name, :current_table, 2)
