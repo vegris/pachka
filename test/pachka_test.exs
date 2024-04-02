@@ -5,24 +5,24 @@ defmodule PachkaTest do
 
   alias Pachka.Server.State
 
-  alias Test.Support.{NoopTimer, SendHandler}
+  alias Test.Support.{NoopTimer, Sink}
 
-  setup [:set_mox_global, :verify_on_exit!, :stub_timer, :configure_handler, :start_server]
+  setup [:set_mox_global, :verify_on_exit!, :stub_timer, :configure_sink, :start_server]
 
   defp stub_timer(_context) do
     stub_with(Pachka.TimerMock, NoopTimer)
     :ok
   end
 
-  defp configure_handler(_context) do
-    SendHandler.set_receiver_pid(self())
+  defp configure_sink(_context) do
+    Sink.set_receiver_pid(self())
 
-    on_exit(fn -> SendHandler.clear() end)
+    on_exit(fn -> Sink.clear() end)
   end
 
   defp start_server(_context) do
     name = server_name()
-    pid = start_link_supervised!({Pachka.Server, name: name, handler: SendHandler})
+    pid = start_link_supervised!({Pachka.Server, name: name, sink: Sink})
 
     %{name: name, pid: pid}
   end
@@ -70,7 +70,7 @@ defmodule PachkaTest do
 
   @tag :skip
   test "blocks writes on overload", %{name: name, pid: pid} do
-    SendHandler.set_blocking?(true)
+    Sink.set_blocking?(true)
 
     messages = send_messages(name, 15_000)
 
@@ -88,7 +88,7 @@ defmodule PachkaTest do
   end
 
   test "kills exporting process on timeout without losing messages", %{name: name, pid: pid} do
-    SendHandler.set_blocking?(true)
+    Sink.set_blocking?(true)
 
     batch_1 = send_messages(name, 500)
 
@@ -106,7 +106,7 @@ defmodule PachkaTest do
     send(pid, {:export_timeout, export_pid})
     assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
 
-    SendHandler.set_blocking?(false)
+    Sink.set_blocking?(false)
 
     send(pid, :retry_timeout)
     assert_receive {:batch, batch_1_}

@@ -1,11 +1,11 @@
 defmodule Pachka.Server.State do
   @type t :: %__MODULE__{
-          handler: module(),
+          sink: module(),
           state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
           batch: Pachka.Server.Batch.t()
         }
 
-  @enforce_keys ~w[handler state batch]a
+  @enforce_keys ~w[sink state batch]a
   defstruct @enforce_keys
 end
 

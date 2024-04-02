@@ -28,7 +28,7 @@ defmodule Pachka.Server do
   @impl true
   def init(opts) do
     state = %S{
-      handler: Keyword.fetch!(opts, :handler),
+      sink: Keyword.fetch!(opts, :sink),
       state: %Idle{batch_timer: set_batch_timer()},
       batch: Batch.new()
     }
@@ -129,14 +129,14 @@ defmodule Pachka.Server do
   end
 
   defp export_batch(%S{} = state) do
-    handler = state.handler
+    sink = state.sink
     export_batch = Batch.to_list(state.batch)
 
     {pid, monitor_ref} =
       spawn_monitor(fn ->
         Logger.debug("Starting batch export")
 
-        handler.send_batch(export_batch)
+        sink.send_batch(export_batch)
       end)
 
     exporting = %Exporting{
@@ -150,14 +150,14 @@ defmodule Pachka.Server do
   end
 
   defp retry_batch(%S{state: %RetryBackoff{} = r} = state) do
-    handler = state.handler
+    sink = state.sink
     export_batch = r.export_batch
 
     {pid, monitor_ref} =
       spawn_monitor(fn ->
         Logger.debug("Starting batch export")
 
-        handler.send_batch(export_batch)
+        sink.send_batch(export_batch)
       end)
 
     exporting = %Exporting{

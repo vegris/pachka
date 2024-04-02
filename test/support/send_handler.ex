@@ -1,5 +1,5 @@
-defmodule Test.Support.SendHandler do
-  @behaviour Pachka.Handler
+defmodule Test.Support.Sink do
+  @behaviour Pachka.Sink
 
   @impl true
   def send_batch(messages) do
