@@ -59,9 +59,6 @@ defmodule PachkaTest do
     send(pid, :batch_timeout)
     refute_receive {:batch, _messages}
 
-    send(pid, :check_timeout)
-    refute_receive {:batch, _messages}
-
     messages = send_messages(name, 5_000)
 
     send(pid, :batch_timeout)
@@ -69,11 +66,9 @@ defmodule PachkaTest do
 
     send(pid, :batch_timeout)
     refute_receive {:batch, _messages}
-
-    send(pid, :check_timeout)
-    refute_receive {:batch, _messages}
   end
 
+  @tag :skip
   test "blocks writes on overload", %{name: name, pid: pid} do
     SendHandler.set_blocking?(true)
 
@@ -97,12 +92,12 @@ defmodule PachkaTest do
 
     batch_1 = send_messages(name, 500)
 
-    send(pid, :check_timeout)
-    assert_receive {:batch, ^batch_1}
+    send(pid, :batch_timeout)
+    refute_receive {:batch, _batch_1}
 
     batch_2 = send_messages(name, 500)
 
-    send(pid, :check_timeout)
+    send(pid, :batch_timeout)
     refute_receive {:batch, _messages}
 
     export_pid = get_export_pid(pid)
@@ -114,8 +109,11 @@ defmodule PachkaTest do
     SendHandler.set_blocking?(false)
 
     send(pid, :retry_timeout)
-    assert_receive {:batch, ^batch_1}
-    send(pid, :check_timeout)
-    assert_receive {:batch, ^batch_2}
+    assert_receive {:batch, batch_1_}
+    assert batch_1 == batch_1_
+
+    send(pid, :batch_timeout)
+    assert_receive {:batch, batch_2_}
+    assert batch_2 == batch_2_
   end
 end

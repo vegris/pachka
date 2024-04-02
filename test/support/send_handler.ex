@@ -3,10 +3,10 @@ defmodule Test.Support.SendHandler do
 
   @impl true
   def send_batch(messages) do
-    send(receiver_pid(), {:batch, messages})
-
     if blocking?() do
       Process.sleep(:infinity)
+    else
+      send(receiver_pid(), {:batch, messages})
     end
 
     :ok
