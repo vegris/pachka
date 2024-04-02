@@ -3,7 +3,6 @@ defmodule Pachka.Server do
 
   require Logger
 
-  alias __MODULE__.Batch
   alias __MODULE__.State, as: S
   alias __MODULE__.State.{Idle, Exporting, RetryBackoff}
 
@@ -28,8 +27,7 @@ defmodule Pachka.Server do
   def init(opts) do
     state = %S{
       sink: Keyword.fetch!(opts, :sink),
-      state: %Idle{batch_timer: set_batch_timer()},
-      batch: Batch.new()
+      state: %Idle{batch_timer: set_batch_timer()}
     }
 
     {:ok, state}
@@ -37,8 +35,7 @@ defmodule Pachka.Server do
 
   @impl true
   def handle_call({:message, message}, _from, %S{} = state) do
-    state = %S{state | batch: Batch.add(state.batch, message)}
-    {:reply, :ok, state}
+    {:reply, :ok, S.add_message(state, message)}
   end
 
   @impl true
@@ -62,7 +59,7 @@ defmodule Pachka.Server do
   end
 
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
-    if Batch.length(state.batch) > 0 do
+    if state.batch_length > 0 do
       to_exporting(state)
     else
       to_idle(state)
@@ -118,9 +115,9 @@ defmodule Pachka.Server do
   end
 
   defp to_exporting(%S{state: %Idle{}} = state) do
-    exporting = export(state.sink, Batch.to_list(state.batch))
+    {batch, state} = S.take_batch(state)
 
-    %S{state | state: exporting, batch: Batch.new()}
+    %S{state | state: export(state.sink, batch)}
   end
 
   defp to_exporting(%S{state: %RetryBackoff{} = r} = state) do

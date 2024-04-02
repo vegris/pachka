@@ -2,11 +2,25 @@ defmodule Pachka.Server.State do
   @type t :: %__MODULE__{
           sink: module(),
           state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
-          batch: Pachka.Server.Batch.t()
+          batch: [Pachka.message()],
+          batch_length: non_neg_integer()
         }
 
-  @enforce_keys ~w[sink state batch]a
-  defstruct @enforce_keys
+  @enforce_keys ~w[sink state]a
+  defstruct @enforce_keys ++ [batch: [], batch_length: 0]
+
+  @spec add_message(t(), Pachka.message()) :: t()
+  def add_message(%__MODULE__{} = state, message) do
+    %__MODULE__{state | batch: [message | state.batch], batch_length: state.batch_length + 1}
+  end
+
+  @spec take_batch(t()) :: {[Pachka.message()], t()}
+  def take_batch(%__MODULE__{} = state) do
+    batch = Enum.reverse(state.batch)
+    state = %__MODULE__{state | batch: [], batch_length: 0}
+
+    {batch, state}
+  end
 end
 
 defmodule Pachka.Server.State.Idle do
