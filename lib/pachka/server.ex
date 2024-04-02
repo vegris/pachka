@@ -2,14 +2,13 @@ defmodule Pachka.Server do
   use GenServer
 
   require Logger
-  require __MODULE__.Batch, as: Batch
 
+  alias __MODULE__.Batch
   alias __MODULE__.State, as: S
   alias __MODULE__.State.{Idle, Exporting, RetryBackoff}
 
   @timer Pachka.Timer.implementation()
 
-  @max_batch_size 500
   @max_batch_delay :timer.seconds(5)
 
   @export_timeout :timer.seconds(10)
@@ -64,9 +63,9 @@ defmodule Pachka.Server do
 
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
     if Batch.length(state.batch) > 0 do
-      export_batch(state)
+      to_exporting(state)
     else
-      %S{state | state: %Idle{batch_timer: set_batch_timer()}}
+      to_idle(state)
     end
   end
 
@@ -103,72 +102,58 @@ defmodule Pachka.Server do
 
     _ = @timer.cancel_timer(e.export_timer)
 
-    finish_exporting(state, reason)
-  end
-
-  defp handle_retry_timeout(%S{state: %RetryBackoff{}} = state) do
-    retry_batch(state)
-  end
-
-  defp finish_exporting(%S{} = state, :normal) do
-    if Batch.length(state.batch) >= @max_batch_size do
-      export_batch(state)
+    if reason == :normal do
+      to_idle(state)
     else
-      %S{state | state: %Idle{batch_timer: set_batch_timer()}}
+      to_retry_backoff(state)
     end
   end
 
-  defp finish_exporting(%S{state: %Exporting{} = e} = state, :killed) do
-    r = %RetryBackoff{
-      retry_num: e.retry_num + 1,
+  defp handle_retry_timeout(%S{state: %RetryBackoff{}} = state) do
+    to_exporting(state)
+  end
+
+  defp to_idle(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do
+    %S{state | state: %Idle{batch_timer: set_batch_timer()}}
+  end
+
+  defp to_exporting(%S{state: %Idle{}} = state) do
+    exporting = export(state.sink, Batch.to_list(state.batch))
+
+    %S{state | state: exporting, batch: Batch.new()}
+  end
+
+  defp to_exporting(%S{state: %RetryBackoff{} = r} = state) do
+    exporting = export(state.sink, r.export_batch, r.retry_num + 1)
+
+    %S{state | state: exporting}
+  end
+
+  defp to_retry_backoff(%S{state: %Exporting{} = e} = state) do
+    retry_backoff = %RetryBackoff{
+      retry_num: e.retry_num,
       retry_timer: @timer.send_after(self(), :retry_timeout, @retry_timeout),
       export_batch: e.export_batch
     }
 
-    %S{state | state: r}
+    %S{state | state: retry_backoff}
   end
 
-  defp export_batch(%S{} = state) do
-    sink = state.sink
-    export_batch = Batch.to_list(state.batch)
-
+  defp export(sink, batch, retry_num \\ 0) do
     {pid, monitor_ref} =
       spawn_monitor(fn ->
         Logger.debug("Starting batch export")
 
-        sink.send_batch(export_batch)
+        sink.send_batch(batch)
       end)
 
-    exporting = %Exporting{
+    %Exporting{
       export_timer: @timer.send_after(self(), {:export_timeout, pid}, @export_timeout),
       export_pid: pid,
       export_monitor: monitor_ref,
-      export_batch: export_batch
+      export_batch: batch,
+      retry_num: retry_num
     }
-
-    %S{state | batch: Batch.new(), state: exporting}
-  end
-
-  defp retry_batch(%S{state: %RetryBackoff{} = r} = state) do
-    sink = state.sink
-    export_batch = r.export_batch
-
-    {pid, monitor_ref} =
-      spawn_monitor(fn ->
-        Logger.debug("Starting batch export")
-
-        sink.send_batch(export_batch)
-      end)
-
-    exporting = %Exporting{
-      export_timer: @timer.send_after(self(), {:export_timeout, pid}, @export_timeout),
-      export_pid: pid,
-      export_monitor: monitor_ref,
-      export_batch: export_batch,
-      retry_num: r.retry_num
-    }
-
-    %S{state | state: exporting}
   end
 
   defp set_batch_timer do
