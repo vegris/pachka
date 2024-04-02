@@ -8,6 +8,7 @@ defmodule Pachka.Server do
 
   @timer Pachka.Timer.implementation()
 
+  @max_batch_size 500
   @max_batch_delay :timer.seconds(5)
 
   @export_timeout :timer.seconds(10)
@@ -34,8 +35,17 @@ defmodule Pachka.Server do
   end
 
   @impl true
-  def handle_call({:message, message}, _from, %S{} = state) do
-    {:reply, :ok, S.add_message(state, message)}
+  def handle_call({:message, message}, _from, %S{state: %struct{}} = state) do
+    state = S.add_message(state, message)
+
+    state =
+      if state.batch_length >= @max_batch_size and struct == Idle do
+        to_exporting(state)
+      else
+        state
+      end
+
+    {:reply, :ok, state}
   end
 
   @impl true

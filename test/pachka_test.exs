@@ -34,7 +34,7 @@ defmodule PachkaTest do
   defp send_messages(name, count) do
     random = Enum.random(1..10_000)
 
-    for i <- random..(random + count) do
+    for i <- random..(random + count - 1) do
       :ok = Pachka.send_message(name, i)
       i
     end
@@ -47,10 +47,18 @@ defmodule PachkaTest do
 
   test "collects and sends batches", %{name: name, pid: pid} do
     for _step <- 1..5 do
-      messages = send_messages(name, 500)
+      messages = send_messages(name, 300)
 
+      # Send triggered by batch timeout
       send(pid, :batch_timeout)
 
+      assert_receive {:batch, ^messages}
+    end
+
+    for _step <- 1..5 do
+      messages = send_messages(name, 500)
+
+      # Send triggered by batch size
       assert_receive {:batch, ^messages}
     end
   end
@@ -59,9 +67,8 @@ defmodule PachkaTest do
     send(pid, :batch_timeout)
     refute_receive {:batch, _messages}
 
-    messages = send_messages(name, 5_000)
+    messages = send_messages(name, 500)
 
-    send(pid, :batch_timeout)
     assert_receive {:batch, ^messages}
 
     send(pid, :batch_timeout)
@@ -91,17 +98,12 @@ defmodule PachkaTest do
     Sink.set_blocking?(true)
 
     batch_1 = send_messages(name, 500)
-
-    send(pid, :batch_timeout)
     refute_receive {:batch, _batch_1}
 
     batch_2 = send_messages(name, 500)
-
-    send(pid, :batch_timeout)
     refute_receive {:batch, _messages}
 
     export_pid = get_export_pid(pid)
-
     monitor_ref = Process.monitor(export_pid)
     send(pid, {:export_timeout, export_pid})
     assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
@@ -109,11 +111,7 @@ defmodule PachkaTest do
     Sink.set_blocking?(false)
 
     send(pid, :retry_timeout)
-    assert_receive {:batch, batch_1_}
-    assert batch_1 == batch_1_
-
-    send(pid, :batch_timeout)
-    assert_receive {:batch, batch_2_}
-    assert batch_2 == batch_2_
+    assert_receive {:batch, ^batch_1}
+    assert_receive {:batch, ^batch_2}
   end
 end
