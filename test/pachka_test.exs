@@ -75,23 +75,40 @@ defmodule PachkaTest do
     refute_receive {:batch, _messages}
   end
 
-  @tag :skip
-  test "blocks writes on overload", %{name: name, pid: pid} do
+  test "blocks writes on overload and recovers after", %{name: name, pid: pid} do
     Sink.set_blocking?(true)
 
-    messages = send_messages(name, 15_000)
-
-    send(pid, :check_timeout)
-    assert_receive {:batch, ^messages}
-
-    _messages = send_messages(name, 15_000)
-
-    send(pid, :check_timeout)
-    refute_receive {:batch, _messages}
+    first_batch = send_messages(name, 500)
+    second_batch = send_messages(name, 10_000)
 
     for i <- 1..10 do
       assert {:error, :overloaded} = Pachka.send_message(name, i)
     end
+
+    Sink.set_blocking?(false)
+
+    export_pid = get_export_pid(pid)
+    monitor_ref = Process.monitor(export_pid)
+    send(pid, {:export_timeout, export_pid})
+    assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
+
+    self = self()
+
+    stub(Pachka.TimerMock, :send_after, fn dest, msg, time ->
+      if msg == :batch_timeout do
+        send(self, :process_recovered)
+      end
+
+      NoopTimer.send_after(dest, msg, time)
+    end)
+
+    send(pid, :retry_timeout)
+    assert_receive {:batch, ^first_batch}
+    assert_receive {:batch, ^second_batch}
+
+    assert_receive :process_recovered
+
+    assert :ok = Pachka.send_message(name, :message)
   end
 
   test "kills exporting process on timeout without losing messages", %{name: name, pid: pid} do

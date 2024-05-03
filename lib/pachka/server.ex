@@ -3,30 +3,44 @@ defmodule Pachka.Server do
 
   require Logger
 
+  alias Pachka.StatusTable
+
   alias __MODULE__.State, as: S
   alias __MODULE__.State.{Idle, Exporting, RetryBackoff}
 
   @timer Pachka.Timer.implementation()
 
   @max_batch_size 500
+  @critical_batch_size 10_000
   @max_batch_delay :timer.seconds(5)
 
   @export_timeout :timer.seconds(10)
   @retry_timeout :timer.seconds(1)
 
-  @spec send_message(atom(), Pachka.message()) :: :ok
+  @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
-    GenServer.call(name, {:message, message})
+    status = StatusTable.get_status(name)
+
+    if status == :available do
+      GenServer.call(name, {:message, message})
+    else
+      {:error, status}
+    end
   end
 
   def start_link(opts) do
-    {name, opts} = Keyword.pop!(opts, :name)
+    name = Keyword.fetch!(opts, :name)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @impl true
   def init(opts) do
+    name = Keyword.fetch!(opts, :name)
+
+    StatusTable.set_status(name, :available)
+
     state = %S{
+      name: name,
       sink: Keyword.fetch!(opts, :sink),
       state: %Idle{batch_timer: set_batch_timer()}
     }
@@ -39,8 +53,21 @@ defmodule Pachka.Server do
     state = S.add_message(state, message)
 
     state =
-      if state.batch_length >= @max_batch_size and struct == Idle do
-        to_exporting(state)
+      if state.batch_length >= @max_batch_size do
+        cond do
+          struct == Idle ->
+            to_exporting(state)
+
+          Kernel.rem(state.batch_length, @max_batch_size) == 0 ->
+            if overloaded?(state) do
+              StatusTable.set_status(state.name, :overloaded)
+            end
+
+            state
+
+          :otherwise ->
+            state
+        end
       else
         state
       end
@@ -110,7 +137,13 @@ defmodule Pachka.Server do
     _ = @timer.cancel_timer(e.export_timer)
 
     if reason == :normal do
-      to_idle(state)
+      if state.batch_length >= @max_batch_size do
+        to_exporting(state)
+      else
+        StatusTable.set_status(state.name, :available)
+
+        to_idle(state)
+      end
     else
       to_retry_backoff(state)
     end
@@ -124,7 +157,7 @@ defmodule Pachka.Server do
     %S{state | state: %Idle{batch_timer: set_batch_timer()}}
   end
 
-  defp to_exporting(%S{state: %Idle{}} = state) do
+  defp to_exporting(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do
     {batch, state} = S.take_batch(state)
 
     %S{state | state: export(state.sink, batch)}
@@ -161,6 +194,12 @@ defmodule Pachka.Server do
       export_batch: batch,
       retry_num: retry_num
     }
+  end
+
+  defp overloaded?(%S{} = state) do
+    {:message_queue_len, message_count} = Process.info(self(), :message_queue_len)
+
+    state.batch_length + message_count >= @critical_batch_size
   end
 
   defp set_batch_timer do
