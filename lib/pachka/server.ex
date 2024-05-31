@@ -49,30 +49,25 @@ defmodule Pachka.Server do
   end
 
   @impl true
-  def handle_call({:message, message}, _from, %S{state: %struct{}} = state) do
-    state = S.add_message(state, message)
-
+  def handle_call({:message, message}, _from, %S{} = state) do
     state =
-      if state.batch_length >= @max_batch_size do
-        cond do
-          struct == Idle ->
-            to_exporting(state)
-
-          Kernel.rem(state.batch_length, @max_batch_size) == 0 ->
-            if overloaded?(state) do
-              StatusTable.set_status(state.name, :overloaded)
-            end
-
-            state
-
-          :otherwise ->
-            state
-        end
-      else
-        state
-      end
+      state
+      |> S.add_message(message)
+      |> check_queue_size()
 
     {:reply, :ok, state}
+  end
+
+  defp check_queue_size(%S{} = state) when state.batch_length < @max_batch_size, do: state
+
+  defp check_queue_size(%S{state: %Idle{}} = state), do: to_exporting(state)
+
+  defp check_queue_size(%S{} = state) do
+    if Kernel.rem(state.batch_length, @max_batch_size) == 0 and overloaded?(state) do
+      StatusTable.set_status(state.name, :overloaded)
+    end
+
+    state
   end
 
   @impl true
