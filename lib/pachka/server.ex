@@ -3,19 +3,13 @@ defmodule Pachka.Server do
 
   require Logger
 
+  alias Pachka.Config
   alias Pachka.StatusTable
 
   alias __MODULE__.State, as: S
   alias __MODULE__.State.{Idle, Exporting, RetryBackoff}
 
   @timer Pachka.Timer.implementation()
-
-  @max_batch_size 500
-  @critical_batch_size 10_000
-  @max_batch_delay :timer.seconds(5)
-
-  @export_timeout :timer.seconds(10)
-  @retry_timeout :timer.seconds(1)
 
   @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
@@ -28,21 +22,19 @@ defmodule Pachka.Server do
     end
   end
 
+  @spec start_link(Config.options()) :: GenServer.on_start()
   def start_link(opts) do
-    name = Keyword.fetch!(opts, :name)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    config = Config.from_options(opts)
+    GenServer.start_link(__MODULE__, config, name: config.name)
   end
 
   @impl true
-  def init(opts) do
-    name = Keyword.fetch!(opts, :name)
-
-    StatusTable.set_status(name, :available)
+  def init(%Config{} = config) do
+    StatusTable.set_status(config.name, :available)
 
     state = %S{
-      name: name,
-      sink: Keyword.fetch!(opts, :sink),
-      state: %Idle{batch_timer: set_batch_timer()}
+      config: config,
+      state: %Idle{batch_timer: @timer.send_after(self(), :batch_timeout, config.max_batch_delay)}
     }
 
     {:ok, state}
@@ -58,13 +50,14 @@ defmodule Pachka.Server do
     {:reply, :ok, state}
   end
 
-  defp check_queue_size(%S{} = state) when state.batch_length < @max_batch_size, do: state
+  defp check_queue_size(%S{} = state) when state.batch_length < state.config.max_batch_size,
+    do: state
 
   defp check_queue_size(%S{state: %Idle{}} = state), do: to_exporting(state)
 
   defp check_queue_size(%S{} = state) do
-    if Kernel.rem(state.batch_length, @max_batch_size) == 0 and overloaded?(state) do
-      StatusTable.set_status(state.name, :overloaded)
+    if Kernel.rem(state.batch_length, state.config.max_batch_size) == 0 and overloaded?(state) do
+      StatusTable.set_status(state.config.name, :overloaded)
     end
 
     state
@@ -132,10 +125,10 @@ defmodule Pachka.Server do
     _ = @timer.cancel_timer(e.export_timer)
 
     if reason == :normal do
-      if state.batch_length >= @max_batch_size do
+      if state.batch_length >= state.config.max_batch_size do
         to_exporting(state)
       else
-        StatusTable.set_status(state.name, :available)
+        StatusTable.set_status(state.config.name, :available)
 
         to_idle(state)
       end
@@ -149,17 +142,21 @@ defmodule Pachka.Server do
   end
 
   defp to_idle(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do
-    %S{state | state: %Idle{batch_timer: set_batch_timer()}}
+    idle = %Idle{
+      batch_timer: @timer.send_after(self(), :batch_timeout, state.config.max_batch_delay)
+    }
+
+    %S{state | state: idle}
   end
 
   defp to_exporting(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do
     {batch, state} = S.take_batch(state)
 
-    %S{state | state: export(state.sink, batch)}
+    %S{state | state: export(state.config, batch)}
   end
 
   defp to_exporting(%S{state: %RetryBackoff{} = r} = state) do
-    exporting = export(state.sink, r.export_batch, r.retry_num + 1)
+    exporting = export(state.config, r.export_batch, r.retry_num + 1)
 
     %S{state | state: exporting}
   end
@@ -167,14 +164,16 @@ defmodule Pachka.Server do
   defp to_retry_backoff(%S{state: %Exporting{} = e} = state) do
     retry_backoff = %RetryBackoff{
       retry_num: e.retry_num,
-      retry_timer: @timer.send_after(self(), :retry_timeout, @retry_timeout),
+      retry_timer: @timer.send_after(self(), :retry_timeout, state.config.retry_timeout),
       export_batch: e.export_batch
     }
 
     %S{state | state: retry_backoff}
   end
 
-  defp export(sink, batch, retry_num \\ 0) do
+  defp export(%Config{} = config, batch, retry_num \\ 0) do
+    sink = config.sink
+
     {pid, monitor_ref} =
       spawn_monitor(fn ->
         Logger.debug("Starting batch export")
@@ -183,7 +182,7 @@ defmodule Pachka.Server do
       end)
 
     %Exporting{
-      export_timer: @timer.send_after(self(), {:export_timeout, pid}, @export_timeout),
+      export_timer: @timer.send_after(self(), {:export_timeout, pid}, config.export_timeout),
       export_pid: pid,
       export_monitor: monitor_ref,
       export_batch: batch,
@@ -194,10 +193,6 @@ defmodule Pachka.Server do
   defp overloaded?(%S{} = state) do
     {:message_queue_len, message_count} = Process.info(self(), :message_queue_len)
 
-    state.batch_length + message_count >= @critical_batch_size
-  end
-
-  defp set_batch_timer do
-    @timer.send_after(self(), :batch_timeout, @max_batch_delay)
+    state.batch_length + message_count >= state.config.critical_batch_size
   end
 end

@@ -1,13 +1,12 @@
 defmodule Pachka.Server.State do
   @type t :: %__MODULE__{
-          name: atom(),
-          sink: module(),
+          config: Pachka.Config.t(),
           state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
           batch: [Pachka.message()],
           batch_length: non_neg_integer()
         }
 
-  @enforce_keys ~w[name sink state]a
+  @enforce_keys ~w[config state]a
   defstruct @enforce_keys ++ [batch: [], batch_length: 0]
 
   @spec add_message(t(), Pachka.message()) :: t()
