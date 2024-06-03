@@ -1,3 +1,11 @@
 defmodule Pachka.Sink do
-  @callback send_batch([Pachka.message()]) :: :ok
+  @type failure_reason :: term()
+
+  @callback send_batch([Pachka.message()]) :: :ok | {:error, failure_reason()}
+  @callback retry_timeout(
+              retry_num :: pos_integer(),
+              failure_reason :: :killed | failure_reason()
+            ) :: timeout()
+
+  @optional_callbacks retry_timeout: 2
 end

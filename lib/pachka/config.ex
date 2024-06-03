@@ -5,8 +5,7 @@ defmodule Pachka.Config do
     max_batch_size: [type: :pos_integer, default: 500],
     critical_batch_size: [type: :pos_integer, default: 10_000],
     max_batch_delay: [type: :timeout, default: :timer.seconds(5)],
-    export_timeout: [type: :timeout, default: :timer.seconds(10)],
-    retry_timeout: [type: :timeout, default: :timer.seconds(1)]
+    export_timeout: [type: :timeout, default: :timer.seconds(10)]
   ]
 
   @schema NimbleOptions.new!(schema)
@@ -33,4 +32,11 @@ defmodule Pachka.Config do
     |> NimbleOptions.validate!(@schema)
     |> then(&struct!(__MODULE__, &1))
   end
+
+  # Specify return type as timeout() to align with retry_timeout from Pachka.Sink
+  # although this function always returns pos_integer()
+  @dialyzer {:no_extra_return, default_retry_timeout: 2}
+
+  @spec default_retry_timeout(pos_integer(), :killed | Pachka.Sink.failure_reason()) :: timeout()
+  def default_retry_timeout(retry_num, _failure_reason), do: :timer.seconds(retry_num)
 end

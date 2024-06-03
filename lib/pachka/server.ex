@@ -133,7 +133,7 @@ defmodule Pachka.Server do
         to_idle(state)
       end
     else
-      to_retry_backoff(state)
+      to_retry_backoff(state, reason)
     end
   end
 
@@ -156,16 +156,28 @@ defmodule Pachka.Server do
   end
 
   defp to_exporting(%S{state: %RetryBackoff{} = r} = state) do
-    exporting = export(state.config, r.export_batch, r.retry_num + 1)
+    exporting = export(state.config, r.export_batch, r.retry_num)
 
     %S{state | state: exporting}
   end
 
-  defp to_retry_backoff(%S{state: %Exporting{} = e} = state) do
+  defp to_retry_backoff(%S{state: %Exporting{} = e} = state, reason) do
+    sink = state.config.sink
+
+    retry_num = e.retry_num + 1
+
+    retry_timeout =
+      if function_exported?(sink, :retry_timeout, 2) do
+        sink.retry_timeout(retry_num, reason)
+      else
+        Config.default_retry_timeout(retry_num, reason)
+      end
+
     retry_backoff = %RetryBackoff{
-      retry_num: e.retry_num,
-      retry_timer: @timer.send_after(self(), :retry_timeout, state.config.retry_timeout),
-      export_batch: e.export_batch
+      retry_num: retry_num,
+      retry_timer: @timer.send_after(self(), :retry_timeout, retry_timeout),
+      export_batch: e.export_batch,
+      failure_reason: reason
     }
 
     %S{state | state: retry_backoff}
@@ -178,7 +190,14 @@ defmodule Pachka.Server do
       spawn_monitor(fn ->
         Logger.debug("Starting batch export")
 
-        sink.send_batch(batch)
+        case sink.send_batch(batch) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.debug("Batch export failed", reason: reason)
+            exit(reason)
+        end
       end)
 
     %Exporting{
