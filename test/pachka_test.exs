@@ -5,9 +5,10 @@ defmodule PachkaTest do
 
   alias Pachka.Server.State
 
-  alias Test.Support.{NoopTimer, Sink}
+  alias Test.Support.Sinks
+  alias Test.Support.NoopTimer
 
-  setup [:set_mox_global, :verify_on_exit!, :stub_timer]
+  setup [:set_mox_global, :verify_on_exit!, :stub_timer, :configure_sink]
 
   defp stub_timer(_context) do
     stub_with(Pachka.TimerMock, NoopTimer)
@@ -15,14 +16,14 @@ defmodule PachkaTest do
   end
 
   defp configure_sink(_context) do
-    Sink.set_receiver_pid(self())
+    Sinks.set_receiver_pid(self())
 
-    on_exit(fn -> Sink.clear() end)
+    on_exit(fn -> Sinks.clear() end)
   end
 
-  defp start_server(_context) do
+  defp start_server(_context, sink \\ Pachka.SinkMock) do
     name = server_name()
-    pid = start_link_supervised!({Pachka.Server, name: name, sink: Sink})
+    pid = start_link_supervised!({Pachka.Server, name: name, sink: sink})
 
     %{name: name, pid: pid}
   end
@@ -45,14 +46,18 @@ defmodule PachkaTest do
     export_pid
   end
 
-  describe "basic server" do
-    setup [:configure_sink, :start_server]
+  describe "SendSink" do
+    setup do
+      Mox.stub_with(Pachka.SinkMock, Sinks.SendSink)
+      :ok
+    end
+
+    setup :start_server
 
     test "collects and sends batches", %{name: name, pid: pid} do
       for _step <- 1..5 do
         messages = send_messages(name, 300)
 
-        # Send triggered by batch timeout
         send(pid, :batch_timeout)
 
         assert_receive {:batch, ^messages}
@@ -60,8 +65,6 @@ defmodule PachkaTest do
 
       for _step <- 1..5 do
         messages = send_messages(name, 500)
-
-        # Send triggered by batch size
         assert_receive {:batch, ^messages}
       end
     end
@@ -77,10 +80,17 @@ defmodule PachkaTest do
       send(pid, :batch_timeout)
       refute_receive {:batch, _messages}
     end
+  end
+
+  describe "BlockSink" do
+    setup do
+      stub_with(Pachka.SinkMock, Sinks.BlockSink)
+      :ok
+    end
+
+    setup :start_server
 
     test "blocks writes on overload and recovers after", %{name: name, pid: pid} do
-      Sink.set_blocking?(true)
-
       first_batch = send_messages(name, 500)
       second_batch = send_messages(name, 10_000)
 
@@ -88,7 +98,7 @@ defmodule PachkaTest do
         assert {:error, :overloaded} = Pachka.send_message(name, i)
       end
 
-      Sink.set_blocking?(false)
+      stub_with(Pachka.SinkMock, Sinks.SendSink)
 
       export_pid = get_export_pid(pid)
       monitor_ref = Process.monitor(export_pid)
@@ -115,8 +125,6 @@ defmodule PachkaTest do
     end
 
     test "kills exporting process on timeout without losing messages", %{name: name, pid: pid} do
-      Sink.set_blocking?(true)
-
       batch_1 = send_messages(name, 500)
       refute_receive {:batch, _batch_1}
 
@@ -128,7 +136,7 @@ defmodule PachkaTest do
       send(pid, {:export_timeout, export_pid})
       assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
 
-      Sink.set_blocking?(false)
+      stub_with(Pachka.SinkMock, Sinks.SendSink)
 
       send(pid, :retry_timeout)
       assert_receive {:batch, ^batch_1}
@@ -137,20 +145,14 @@ defmodule PachkaTest do
   end
 
   test "returns export error and calculates new retry timeout with it" do
-    name = ErrorSinkServer
-    pid = start_link_supervised!({Pachka.Server, name: name, sink: Pachka.SinkMock})
+    %{name: name, pid: pid} = start_server(%{}, Sinks.ErrorSink)
 
-    reason = :epic_failure
-    stub(Pachka.SinkMock, :send_batch, fn _batch -> {:error, reason} end)
-
-    expect(Pachka.SinkMock, :retry_timeout, fn retry_num = 1, ^reason -> retry_num * 100 end)
     _batch = send_messages(name, 500)
-    refute_receive {:batch, _batch}
+    assert_receive {:retry, 1}
 
     for retry_num <- 2..5 do
-      expect(Pachka.SinkMock, :retry_timeout, fn ^retry_num, ^reason -> retry_num * 100 end)
       send(pid, :retry_timeout)
-      refute_receive {:batch, _batch}
+      assert_receive {:retry, ^retry_num}
     end
   end
 end
