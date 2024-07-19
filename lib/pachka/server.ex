@@ -13,12 +13,9 @@ defmodule Pachka.Server do
 
   @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
-    status = StatusTable.get_status(name)
-
-    if status == :available do
-      GenServer.call(name, {:message, message})
-    else
-      {:error, status}
+    case StatusTable.get_status(name) do
+      :available -> GenServer.call(name, {:message, message})
+      :overloaded -> {:error, :overloaded}
     end
   end
 
