@@ -49,7 +49,7 @@ defmodule Pachka.Server.State.RetryBackoff do
           retry_num: non_neg_integer(),
           retry_timer: reference(),
           export_batch: [Pachka.message()],
-          failure_reason: :killed | Pachka.Sink.failure_reason()
+          failure_reason: Pachka.Sink.failure_reason()
         }
 
   @enforce_keys ~w[retry_num retry_timer export_batch failure_reason]a

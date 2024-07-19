@@ -33,10 +33,6 @@ defmodule Pachka.Config do
     |> then(&struct!(__MODULE__, &1))
   end
 
-  # Specify return type as timeout() to align with retry_timeout from Pachka.Sink
-  # although this function always returns pos_integer()
-  @dialyzer {:no_extra_return, default_retry_timeout: 2}
-
-  @spec default_retry_timeout(pos_integer(), :killed | Pachka.Sink.failure_reason()) :: timeout()
+  @spec default_retry_timeout(pos_integer(), Pachka.Sink.failure_reason()) :: non_neg_integer()
   def default_retry_timeout(retry_num, _failure_reason), do: :timer.seconds(retry_num)
 end
