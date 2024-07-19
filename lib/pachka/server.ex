@@ -30,6 +30,8 @@ defmodule Pachka.Server do
 
   @impl true
   def init(%Config{} = config) do
+    Process.flag(:trap_exit, true)
+
     StatusTable.set_status(config.name, :available)
 
     state = %S{
@@ -73,8 +75,8 @@ defmodule Pachka.Server do
         {:export_timeout, export_pid} ->
           handle_export_timeout(state, export_pid)
 
-        {:DOWN, ref, :process, pid, reason} ->
-          handle_process_down(state, ref, pid, reason)
+        {:EXIT, pid, reason} ->
+          handle_process_exit(state, pid, reason)
 
         :retry_timeout ->
           handle_retry_timeout(state)
@@ -119,8 +121,8 @@ defmodule Pachka.Server do
     state
   end
 
-  defp handle_process_down(%S{state: %Exporting{} = e} = state, ref, pid, reason) do
-    Logger.debug("Received process DOWN message", pid: pid, ref: ref, reason: reason)
+  defp handle_process_exit(%S{state: %Exporting{} = e} = state, pid, reason) do
+    Logger.debug("Received process EXIT message", pid: pid, reason: reason)
 
     _ = @timer.cancel_timer(e.export_timer)
 
@@ -186,8 +188,8 @@ defmodule Pachka.Server do
   defp export(%Config{} = config, batch, retry_num \\ 0) do
     sink = config.sink
 
-    {pid, monitor_ref} =
-      spawn_monitor(fn ->
+    pid =
+      spawn_link(fn ->
         Logger.debug("Starting batch export")
 
         case sink.send_batch(batch) do
@@ -203,7 +205,6 @@ defmodule Pachka.Server do
     %Exporting{
       export_timer: @timer.send_after(self(), {:export_timeout, pid}, config.export_timeout),
       export_pid: pid,
-      export_monitor: monitor_ref,
       export_batch: batch,
       retry_num: retry_num
     }

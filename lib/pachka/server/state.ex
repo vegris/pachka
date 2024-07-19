@@ -36,12 +36,11 @@ defmodule Pachka.Server.State.Exporting do
   @type t :: %__MODULE__{
           export_timer: reference(),
           export_pid: pid(),
-          export_monitor: reference(),
           export_batch: [Pachka.message()],
           retry_num: non_neg_integer()
         }
 
-  @enforce_keys ~w[export_timer export_pid export_monitor export_batch]a
+  @enforce_keys ~w[export_timer export_pid export_batch]a
   defstruct @enforce_keys ++ [retry_num: 0]
 end
 
