@@ -25,6 +25,11 @@ defmodule Pachka.Server do
     GenServer.start_link(__MODULE__, config, name: config.name)
   end
 
+  @spec stop(GenServer.server(), timeout()) :: :ok
+  def stop(server, timeout \\ :infinity) do
+    GenServer.stop(server, :normal, timeout)
+  end
+
   @impl true
   def init(%Config{} = config) do
     Process.flag(:trap_exit, true)
