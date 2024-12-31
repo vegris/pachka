@@ -155,4 +155,79 @@ defmodule PachkaTest do
       assert_receive {:retry, ^retry_num}
     end
   end
+
+  describe "config" do
+    @valid_config [
+      name: Pachka,
+      sink: Pachka.SinkMock
+    ]
+
+    @valid_config_full [
+      name: Pachka,
+      sink: Pachka.SinkMock,
+      max_batch_size: 500,
+      critical_batch_size: 10_000,
+      max_batch_delay: :timer.seconds(5),
+      export_timeout: :timer.seconds(10)
+    ]
+
+    test "starts with valid config" do
+      pid = start_link_supervised!({Pachka, @valid_config})
+      assert Process.alive?(pid)
+    end
+
+    test "starts with full valid config" do
+      pid = start_link_supervised!({Pachka, @valid_config_full})
+      assert Process.alive?(pid)
+    end
+
+    test "raise without name" do
+      config = Keyword.delete(@valid_config, :name)
+
+      assert_raise RuntimeError, ~r/required :name option not found/, fn ->
+        start_link_supervised!({Pachka, config})
+      end
+    end
+
+    test "raise without sink" do
+      config = Keyword.delete(@valid_config, :sink)
+
+      assert_raise RuntimeError, ~r/required :sink option not found/, fn ->
+        start_link_supervised!({Pachka, config})
+      end
+    end
+
+    test "raise on unknown key" do
+      config = Keyword.put(@valid_config, :unknown, :value)
+
+      assert_raise RuntimeError, ~r/unknown options \[:unknown\]/, fn ->
+        start_link_supervised!({Pachka, config})
+      end
+    end
+
+    parameters = [
+      {"raise on invalid name", :name, 1, "atom"},
+      {"raise on invalid sink", :sink, 1, "atom"},
+      {"raise on max_batch_size == 0", :max_batch_size, 0, "positive integer"},
+      {"raise on max_batch_size < 0", :max_batch_size, -500, "positive integer"},
+      {"raise on critical_batch_size == 0", :critical_batch_size, 0, "positive integer"},
+      {"raise on critical_batch_size < 0", :critical_batch_size, -500, "positive integer"},
+      {"raise on max_batch_delay < 0", :max_batch_delay, -500,
+       "non-negative integer or :infinity"},
+      {"raise on export_timeout < 0", :export_timeout, -500, "non-negative integer or :infinity"}
+    ]
+
+    for {name, key, value, expected} <- parameters do
+      test name do
+        config = Keyword.put(@valid_config, unquote(key), unquote(value))
+
+        error =
+          "invalid value for :#{unquote(key)} option: expected #{unquote(expected)}, got: #{unquote(value)}"
+
+        assert_raise RuntimeError, Regex.compile!(error), fn ->
+          start_link_supervised!({Pachka, config})
+        end
+      end
+    end
+  end
 end
