@@ -1,4 +1,4 @@
-defmodule Pachka.Server.State do
+defmodule Pachka.State do
   @type t :: %__MODULE__{
           config: Pachka.Config.t(),
           state: __MODULE__.Idle.t() | __MODULE__.Exporting.t() | __MODULE__.RetryBackoff.t(),
@@ -23,7 +23,7 @@ defmodule Pachka.Server.State do
   end
 end
 
-defmodule Pachka.Server.State.Idle do
+defmodule Pachka.State.Idle do
   @type t :: %__MODULE__{
           batch_timer: reference()
         }
@@ -32,7 +32,7 @@ defmodule Pachka.Server.State.Idle do
   defstruct @enforce_keys
 end
 
-defmodule Pachka.Server.State.Exporting do
+defmodule Pachka.State.Exporting do
   @type t :: %__MODULE__{
           export_timer: reference(),
           export_pid: pid(),
@@ -44,7 +44,7 @@ defmodule Pachka.Server.State.Exporting do
   defstruct @enforce_keys ++ [retry_num: 0]
 end
 
-defmodule Pachka.Server.State.RetryBackoff do
+defmodule Pachka.State.RetryBackoff do
   @type t :: %__MODULE__{
           retry_num: non_neg_integer(),
           retry_timer: reference(),

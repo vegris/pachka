@@ -73,14 +73,14 @@ defmodule Pachka.Benchmarks.SQLite do
   end
 
   defp run_pachka do
-    {:ok, _pid} = Pachka.Server.start_link(name: Pachka, sink: Sink)
+    {:ok, _pid} = Pachka.start_link(name: Pachka, sink: Sink)
 
     :timer.tc(fn ->
       for i <- 1..10_000 do
         Pachka.send_message(Pachka, "Post #{i}")
       end
 
-      Pachka.Server.stop(Pachka)
+      Pachka.stop(Pachka)
     end)
     |> dbg()
   end

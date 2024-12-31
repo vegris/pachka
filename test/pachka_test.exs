@@ -3,7 +3,7 @@ defmodule PachkaTest do
 
   import Mox
 
-  alias Pachka.Server.State
+  alias Pachka.State
 
   alias Test.Support.Sinks
   alias Test.Support.NoopTimer
@@ -23,13 +23,13 @@ defmodule PachkaTest do
 
   defp start_server(_context, sink \\ Pachka.SinkMock) do
     name = server_name()
-    pid = start_link_supervised!({Pachka.Server, name: name, sink: sink})
+    pid = start_link_supervised!({Pachka, name: name, sink: sink})
 
     %{name: name, pid: pid}
   end
 
   defp server_name do
-    :"#{Pachka.Server}_#{System.unique_integer()}"
+    :"#{Pachka}_#{System.unique_integer()}"
   end
 
   defp send_messages(name, count) do
