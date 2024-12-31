@@ -25,6 +25,7 @@ defmodule Pachka.MixProject do
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:bench), do: ["lib", "benchmarks"]
   defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help deps" to learn about dependencies.
@@ -33,7 +34,9 @@ defmodule Pachka.MixProject do
       {:nimble_options, "~> 1.1"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:mox, "~> 1.1", only: :test}
+      {:mox, "~> 1.1", only: :test},
+      {:ecto_sql, "~> 3.12", only: :bench},
+      {:ecto_sqlite3, "~> 0.18", only: :bench}
     ]
   end
 
