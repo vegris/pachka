@@ -3,7 +3,7 @@ defmodule Pachka.Application do
 
   def start(_type, _args) do
     children = [
-      Pachka.StatusTable.Holder
+      Pachka.StatusTable
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one)
