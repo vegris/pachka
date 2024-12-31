@@ -140,6 +140,29 @@ defmodule Pachka.Server do
     to_exporting(state)
   end
 
+  @impl true
+  def terminate(reason, %S{state: %Idle{}, batch_length: 0}), do: reason
+
+  def terminate(reason, %S{state: %Idle{}} = state) do
+    sink = state.config.sink
+
+    {batch, _state} = S.take_batch(state)
+
+    case sink.send_batch(batch) do
+      :ok -> reason
+      {:error, send_reason} -> send_reason
+    end
+  end
+
+  def terminate(reason, %S{state: %Exporting{}} = state) do
+    state =
+      receive do
+        {:EXIT, pid, reason} -> handle_process_exit(state, pid, reason)
+      end
+
+    terminate(reason, state)
+  end
+
   defp to_idle(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do
     idle = %Idle{
       batch_timer: @timer.send_after(self(), :batch_timeout, state.config.max_batch_delay)
