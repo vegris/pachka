@@ -1,14 +1,16 @@
 defmodule Pachka do
   use GenServer
 
-  require Logger
-
-  require __MODULE__.State, as: State
-
   alias Pachka.Config
 
-  alias __MODULE__.State, as: S
-  alias __MODULE__.State.{Idle, Exporting, RetryBackoff}
+  # One letter name for easier pattern matching
+  alias Pachka.State, as: S
+  alias Pachka.State.{Idle, Exporting, RetryBackoff}
+
+  require Logger
+
+  # Require guards and create an alias to use them
+  require Pachka.State, as: State
 
   @timer Pachka.Timer.implementation()
 

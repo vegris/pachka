@@ -3,11 +3,16 @@
     %{
       name: "default",
       strict: true,
-      checks: [
-        {Credo.Check.Readability.ModuleDoc, false},
-        {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, false},
-        {Credo.Check.Readability.AliasOrder, false}
-      ]
+      checks: %{
+        disabled: [
+          {Credo.Check.Readability.ModuleDoc, []},
+          {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, []},
+          {Credo.Check.Readability.AliasOrder, []}
+        ],
+        extra: [
+          {Credo.Check.Readability.StrictModuleLayout, []}
+        ]
+      }
     }
   ]
 }
