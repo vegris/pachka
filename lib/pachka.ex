@@ -3,6 +3,8 @@ defmodule Pachka do
 
   require Logger
 
+  require __MODULE__.State, as: State
+
   alias Pachka.Config
   alias Pachka.StatusTable
 
@@ -50,22 +52,22 @@ defmodule Pachka do
   def handle_call({:message, message}, _from, %S{} = state) do
     state =
       state
-      |> S.add_message(message)
+      |> State.add_message(message)
       |> check_queue_size()
 
     {:reply, :ok, state}
   end
 
-  defp check_queue_size(%S{} = state) when state.batch_length < state.config.max_batch_size,
-    do: state
+  defp check_queue_size(%S{state: %Idle{}} = state) when State.is_batch_ready(state) do
+    to_exporting(state)
+  end
 
-  defp check_queue_size(%S{state: %Idle{}} = state), do: to_exporting(state)
+  defp check_queue_size(%S{} = state) when State.is_full(state) do
+    StatusTable.set_status(state.config.name, :overloaded)
+    state
+  end
 
   defp check_queue_size(%S{} = state) do
-    if Kernel.rem(state.batch_length, state.config.max_batch_size) == 0 and overloaded?(state) do
-      StatusTable.set_status(state.config.name, :overloaded)
-    end
-
     state
   end
 
@@ -90,10 +92,10 @@ defmodule Pachka do
   end
 
   defp handle_batch_timeout(%S{state: %Idle{}} = state) do
-    if state.batch_length > 0 do
-      to_exporting(state)
-    else
+    if State.is_empty(state) do
       to_idle(state)
+    else
+      to_exporting(state)
     end
   end
 
@@ -131,7 +133,7 @@ defmodule Pachka do
     _ = @timer.cancel_timer(e.export_timer)
 
     if reason == :normal do
-      if state.batch_length >= state.config.max_batch_size do
+      if State.is_batch_ready(state) do
         to_exporting(state)
       else
         StatusTable.set_status(state.config.name, :available)
@@ -153,7 +155,7 @@ defmodule Pachka do
   def terminate(reason, %S{state: %Idle{}} = state) do
     sink = state.config.sink
 
-    {batch, _state} = S.take_batch(state)
+    {batch, _state} = State.take_batch(state)
 
     case sink.send_batch(batch) do
       :ok -> reason
@@ -179,7 +181,7 @@ defmodule Pachka do
   end
 
   defp to_exporting(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do
-    {batch, state} = S.take_batch(state)
+    {batch, state} = State.take_batch(state)
 
     %S{state | state: export(state.config, batch)}
   end
@@ -235,11 +237,5 @@ defmodule Pachka do
       export_batch: batch,
       retry_num: retry_num
     }
-  end
-
-  defp overloaded?(%S{} = state) do
-    {:message_queue_len, message_count} = Process.info(self(), :message_queue_len)
-
-    state.batch_length + message_count >= state.config.critical_batch_size
   end
 end

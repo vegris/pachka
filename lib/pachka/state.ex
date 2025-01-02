@@ -9,6 +9,10 @@ defmodule Pachka.State do
   @enforce_keys ~w[config state]a
   defstruct @enforce_keys ++ [batch: [], batch_length: 0]
 
+  defguard is_empty(state) when state.batch_length == 0
+  defguard is_batch_ready(state) when state.batch_length >= state.config.max_batch_size
+  defguard is_full(state) when state.batch_length >= state.config.critical_batch_size
+
   @spec add_message(t(), Pachka.message()) :: t()
   def add_message(%__MODULE__{} = state, message) do
     %__MODULE__{state | batch: [message | state.batch], batch_length: state.batch_length + 1}
