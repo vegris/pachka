@@ -16,10 +16,12 @@ defmodule Pachka.State do
 
   @spec take_batch(t()) :: {[Pachka.message()], t()}
   def take_batch(%__MODULE__{} = state) do
-    batch = Enum.reverse(state.batch)
-    state = %__MODULE__{state | batch: [], batch_length: 0}
+    rest_length = max(state.batch_length - state.config.max_batch_size, 0)
+    {rest, batch} = Enum.split(state.batch, rest_length)
 
-    {batch, state}
+    state = %__MODULE__{state | batch: rest, batch_length: rest_length}
+
+    {Enum.reverse(batch), state}
   end
 end
 

@@ -92,7 +92,7 @@ defmodule PachkaTest do
 
     test "blocks writes on overload and recovers after", %{name: name, pid: pid} do
       first_batch = send_messages(name, 500)
-      second_batch = send_messages(name, 10_000)
+      other_messages = send_messages(name, 10_000)
 
       for i <- 1..10 do
         assert {:error, :overloaded} = Pachka.send_message(name, i)
@@ -117,7 +117,10 @@ defmodule PachkaTest do
 
       send(pid, :retry_timeout)
       assert_receive {:batch, ^first_batch}
-      assert_receive {:batch, ^second_batch}
+
+      for batch <- Enum.chunk_every(other_messages, 500) do
+        assert_receive {:batch, ^batch}
+      end
 
       assert_receive :process_recovered
 
