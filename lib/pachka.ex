@@ -6,7 +6,6 @@ defmodule Pachka do
   require __MODULE__.State, as: State
 
   alias Pachka.Config
-  alias Pachka.StatusTable
 
   alias __MODULE__.State, as: S
   alias __MODULE__.State.{Idle, Exporting, RetryBackoff}
@@ -17,10 +16,7 @@ defmodule Pachka do
 
   @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
-    case StatusTable.get_status(name) do
-      :available -> GenServer.call(name, {:message, message})
-      :overloaded -> {:error, :overloaded}
-    end
+    GenServer.call(name, {:message, message})
   end
 
   @spec start_link(Config.options()) :: GenServer.on_start()
@@ -38,8 +34,6 @@ defmodule Pachka do
   def init(%Config{} = config) do
     Process.flag(:trap_exit, true)
 
-    StatusTable.set_status(config.name, :available)
-
     state = %S{
       config: config,
       state: %Idle{batch_timer: @timer.send_after(self(), :batch_timeout, config.max_batch_delay)}
@@ -49,6 +43,10 @@ defmodule Pachka do
   end
 
   @impl true
+  def handle_call({:message, _message}, _from, %S{} = state) when State.is_full(state) do
+    {:reply, {:error, :overloaded}, state}
+  end
+
   def handle_call({:message, message}, _from, %S{} = state) do
     state =
       state
@@ -58,18 +56,10 @@ defmodule Pachka do
     {:reply, :ok, state}
   end
 
-  defp check_queue_size(%S{state: %Idle{}} = state) when State.is_batch_ready(state) do
-    to_exporting(state)
-  end
+  defp check_queue_size(%S{state: %Idle{}} = state) when State.is_batch_ready(state),
+    do: to_exporting(state)
 
-  defp check_queue_size(%S{} = state) when State.is_full(state) do
-    StatusTable.set_status(state.config.name, :overloaded)
-    state
-  end
-
-  defp check_queue_size(%S{} = state) do
-    state
-  end
+  defp check_queue_size(%S{} = state), do: state
 
   @impl true
   def handle_info(msg, %S{} = state) do
@@ -136,8 +126,6 @@ defmodule Pachka do
       if State.is_batch_ready(state) do
         to_exporting(state)
       else
-        StatusTable.set_status(state.config.name, :available)
-
         to_idle(state)
       end
     else

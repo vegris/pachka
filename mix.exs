@@ -18,10 +18,7 @@ defmodule Pachka.MixProject do
 
   # Run "mix help compile.app" to learn about applications.
   def application do
-    [
-      mod: {Pachka.Application, []},
-      extra_applications: [:logger]
-    ]
+    [extra_applications: [:logger]]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
