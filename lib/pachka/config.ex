@@ -8,23 +8,23 @@ defmodule Pachka.Config do
     export_timeout: [type: :timeout, default: :timer.seconds(10)]
   ]
 
-  @schema NimbleOptions.new!(schema)
+  typespec = NimbleOptions.option_typespec(schema)
 
-  typespecs = NimbleOptions.option_typespec(schema)
-
-  @type options :: [unquote(typespecs)]
-
-  defmodule DeunionizeSpec do
-    def deunionize(typespec), do: deunionize(typespec, [])
-
-    defp deunionize({:|, _meta, [type, rest]}, acc), do: deunionize(rest, [type | acc])
-    defp deunionize(type, acc), do: [type | acc]
+  # Converts `type1 | type2 | type3` into `[type1, type2, type3]`
+  split_type_union = fn
+    {:|, _meta, [type, rest]}, acc, rec_fn -> rec_fn.(rest, [type | acc], rec_fn)
+    type, acc, _rec_fn -> [type | acc]
   end
 
-  @type t :: %__MODULE__{unquote_splicing(DeunionizeSpec.deunionize(typespecs))}
+  types = split_type_union.(typespec, [], split_type_union)
+
+  @type t :: %__MODULE__{unquote_splicing(types)}
+  @type options :: [unquote(typespec)]
 
   @enforce_keys Keyword.keys(schema)
   defstruct @enforce_keys
+
+  @schema NimbleOptions.new!(schema)
 
   @spec from_options(options()) :: t()
   def from_options(options) do
