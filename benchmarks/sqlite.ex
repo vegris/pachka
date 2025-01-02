@@ -36,7 +36,7 @@ defmodule Pachka.Benchmarks.SQLite do
           %{title: title, inserted_at: {:placeholder, :now}, updated_at: {:placeholder, :now}}
         end)
 
-      Repo.insert_all(Post, posts, placeholders: %{now: DateTime.utc_now()})
+      _ = Repo.insert_all(Post, posts, placeholders: %{now: DateTime.utc_now()})
 
       :ok
     end
@@ -53,12 +53,14 @@ defmodule Pachka.Benchmarks.SQLite do
     :ok = Repo.__adapter__().storage_up(config)
     {:ok, _} = Repo.start_link()
 
-    Ecto.Migrator.run(Repo, [{0, Migration}], :up, all: true)
+    _ = Ecto.Migrator.run(Repo, [{0, Migration}], :up, all: true)
 
     fun.()
 
     Repo.stop()
-    Repo.__adapter__().storage_down(config)
+    _ = Repo.__adapter__().storage_down(config)
+
+    :ok
   end
 
   defp run_single do
@@ -77,7 +79,7 @@ defmodule Pachka.Benchmarks.SQLite do
 
     :timer.tc(fn ->
       for i <- 1..10_000 do
-        Pachka.send_message(Pachka, "Post #{i}")
+        :ok = Pachka.send_message(Pachka, "Post #{i}")
       end
 
       Pachka.stop(Pachka)

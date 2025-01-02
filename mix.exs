@@ -29,8 +29,8 @@ defmodule Pachka.MixProject do
   defp deps do
     [
       {:nimble_options, "~> 1.1"},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test, :bench], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test, :bench], runtime: false},
       {:mox, "~> 1.1", only: :test},
       {:ecto_sql, "~> 3.12", only: :bench},
       {:ecto_sqlite3, "~> 0.18", only: :bench}
