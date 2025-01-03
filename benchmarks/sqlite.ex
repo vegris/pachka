@@ -30,7 +30,7 @@ defmodule Pachka.Benchmarks.SQLite do
 
     @behaviour Pachka.Sink
 
-    def send_batch(messages) do
+    def send_batch(messages, _server_value) do
       posts =
         Enum.map(messages, fn title ->
           %{title: title, inserted_at: {:placeholder, :now}, updated_at: {:placeholder, :now}}

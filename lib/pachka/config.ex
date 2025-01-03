@@ -2,6 +2,7 @@ defmodule Pachka.Config do
   schema = [
     name: [type: :atom, required: true],
     sink: [type: :atom, required: true, type_spec: quote(do: module())],
+    server_value: [type: :any, default: nil],
     max_batch_size: [type: :pos_integer, default: 500],
     critical_batch_size: [type: :pos_integer, default: 10_000],
     max_batch_delay: [type: :timeout, default: :timer.seconds(5)],

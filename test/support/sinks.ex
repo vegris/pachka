@@ -5,7 +5,7 @@ defmodule Test.Support.Sinks do
     @behaviour Pachka.Sink
 
     @impl true
-    def send_batch(messages) do
+    def send_batch(messages, _server_value) do
       send(Sinks.receiver_pid(), {:batch, messages})
       :ok
     end
@@ -15,7 +15,9 @@ defmodule Test.Support.Sinks do
     @behaviour Pachka.Sink
 
     @impl true
-    def send_batch(_messages), do: Process.sleep(:infinity)
+    def send_batch(_message, _server_values) do
+      Process.sleep(:infinity)
+    end
   end
 
   defmodule ErrorSink do
@@ -24,7 +26,7 @@ defmodule Test.Support.Sinks do
     @failure_reason :export_failed
 
     @impl true
-    def send_batch(_messages), do: {:error, @failure_reason}
+    def send_batch(_messages, _server_value), do: {:error, @failure_reason}
 
     @impl true
     def retry_timeout(retry_num, @failure_reason) do

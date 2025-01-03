@@ -144,10 +144,11 @@ defmodule Pachka do
 
   def terminate(reason, %S{state: %Idle{}} = state) do
     sink = state.config.sink
+    server_value = state.config.server_value
 
     {batch, _state} = State.take_batch(state)
 
-    case sink.send_batch(batch) do
+    case sink.send_batch(batch, server_value) do
       :ok -> reason
       {:error, send_reason} -> send_reason
     end
@@ -206,12 +207,13 @@ defmodule Pachka do
 
   defp export(%Config{} = config, batch, retry_num \\ 0) do
     sink = config.sink
+    server_value = config.server_value
 
     pid =
       spawn_link(fn ->
         Logger.debug("Starting batch export")
 
-        case sink.send_batch(batch) do
+        case sink.send_batch(batch, server_value) do
           :ok ->
             :ok
 

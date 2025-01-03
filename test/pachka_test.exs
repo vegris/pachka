@@ -124,7 +124,8 @@ defmodule PachkaTest do
 
       assert_receive :process_recovered
 
-      assert :ok = Pachka.send_message(name, :message)
+      batch = send_messages(name, 500)
+      assert_receive {:batch, ^batch}
     end
 
     test "kills exporting process on timeout without losing messages", %{name: name, pid: pid} do
@@ -159,6 +160,31 @@ defmodule PachkaTest do
     end
   end
 
+  test "passes server value to send_batch function" do
+    test_pid = self()
+
+    stub(Pachka.SinkMock, :send_batch, fn messages, server_value ->
+      send(test_pid, {:batch, messages, server_value})
+      :ok
+    end)
+
+    name = server_name()
+    server_value = make_ref()
+
+    start_link_supervised!(
+      {Pachka, name: name, sink: Pachka.SinkMock, server_value: server_value}
+    )
+
+    # Passes server_value on regular export
+    batch = send_messages(name, 500)
+    assert_receive {:batch, ^batch, ^server_value}
+
+    # Passes server_value on terminate
+    batch = send_messages(name, 5)
+    Pachka.stop(name)
+    assert_receive {:batch, ^batch, ^server_value}
+  end
+
   describe "config" do
     @valid_config [
       name: Pachka,
@@ -168,6 +194,7 @@ defmodule PachkaTest do
     @valid_config_full [
       name: Pachka,
       sink: Pachka.SinkMock,
+      server_value: :term,
       max_batch_size: 500,
       critical_batch_size: 10_000,
       max_batch_delay: :timer.seconds(5),
