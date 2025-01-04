@@ -2,7 +2,7 @@ defmodule Pachka.Config do
   schema = [
     name: [type: :atom, required: true],
     sink: [type: :atom, required: true, type_spec: quote(do: module())],
-    server_value: [type: :any, default: nil],
+    server_value: [type: :any, default: nil, type_spec: quote(do: Pachka.Sink.server_value())],
     max_batch_size: [type: :pos_integer, default: 500],
     critical_batch_size: [type: :pos_integer, default: 10_000],
     max_batch_delay: [type: :timeout, default: :timer.seconds(5)],
@@ -33,7 +33,4 @@ defmodule Pachka.Config do
     |> NimbleOptions.validate!(@schema)
     |> then(&struct!(__MODULE__, &1))
   end
-
-  @spec default_retry_timeout(pos_integer(), Pachka.Sink.failure_reason()) :: non_neg_integer()
-  def default_retry_timeout(retry_num, _failure_reason), do: :timer.seconds(retry_num)
 end

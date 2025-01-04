@@ -15,7 +15,7 @@ defmodule Test.Support.Sinks do
     @behaviour Pachka.Sink
 
     @impl true
-    def send_batch(_message, _server_values) do
+    def send_batch(_message, _server_value) do
       Process.sleep(:infinity)
     end
   end
@@ -29,7 +29,7 @@ defmodule Test.Support.Sinks do
     def send_batch(_messages, _server_value), do: {:error, @failure_reason}
 
     @impl true
-    def retry_timeout(retry_num, @failure_reason) do
+    def retry_timeout(retry_num, @failure_reason, _server_value) do
       send(Sinks.receiver_pid(), {:retry, retry_num})
       retry_num * 100
     end

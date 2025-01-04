@@ -185,6 +185,27 @@ defmodule PachkaTest do
     assert_receive {:batch, ^batch, ^server_value}
   end
 
+  test "passes server value to retry_timeout function" do
+    test_pid = self()
+
+    Pachka.SinkFullMock
+    |> stub(:send_batch, fn _messages, _server_value -> {:error, :failed} end)
+    |> stub(:retry_timeout, fn retry_num, _failure_reason, server_value ->
+      send(test_pid, {:retry, server_value})
+      retry_num
+    end)
+
+    name = server_name()
+    server_value = make_ref()
+
+    start_link_supervised!(
+      {Pachka, name: name, sink: Pachka.SinkFullMock, server_value: server_value}
+    )
+
+    _batch = send_messages(name, 500)
+    assert_receive {:retry, ^server_value}
+  end
+
   describe "config" do
     @valid_config [
       name: Pachka,

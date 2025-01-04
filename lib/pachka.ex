@@ -189,10 +189,10 @@ defmodule Pachka do
     retry_num = e.retry_num + 1
 
     retry_timeout =
-      if function_exported?(sink, :retry_timeout, 2) do
-        sink.retry_timeout(retry_num, reason)
+      if function_exported?(sink, :retry_timeout, 3) do
+        sink.retry_timeout(retry_num, reason, state.config.server_value)
       else
-        Config.default_retry_timeout(retry_num, reason)
+        default_retry_timeout(retry_num)
       end
 
     retry_backoff = %RetryBackoff{
@@ -230,4 +230,6 @@ defmodule Pachka do
       retry_num: retry_num
     }
   end
+
+  defp default_retry_timeout(retry_num), do: :timer.seconds(retry_num)
 end
