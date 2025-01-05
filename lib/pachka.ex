@@ -140,7 +140,7 @@ defmodule Pachka do
   end
 
   @impl true
-  def terminate(reason, %S{state: %Idle{}, batch_length: 0}), do: reason
+  def terminate(reason, %S{state: %Idle{}} = state) when State.is_empty(state), do: reason
 
   def terminate(reason, %S{state: %Idle{}} = state) do
     sink = state.config.sink
