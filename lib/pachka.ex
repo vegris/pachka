@@ -16,15 +16,15 @@ defmodule Pachka do
 
   @type message :: term()
 
-  @spec send_message(atom(), Pachka.message()) :: :ok | {:error, :overloaded}
+  @spec send_message(GenServer.server(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
     GenServer.call(name, {:message, message})
   end
 
   @spec start_link(Config.options()) :: GenServer.on_start()
   def start_link(opts) do
-    config = Config.from_options(opts)
-    GenServer.start_link(__MODULE__, config, name: config.name)
+    {config, start_link_opts} = Config.parse_options(opts)
+    GenServer.start_link(__MODULE__, config, start_link_opts)
   end
 
   @spec stop(GenServer.server(), timeout()) :: :ok

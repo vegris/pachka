@@ -22,14 +22,9 @@ defmodule PachkaTest do
   end
 
   defp start_server(_context, sink \\ Pachka.SinkMock) do
-    name = server_name()
-    pid = start_link_supervised!({Pachka, name: name, sink: sink})
+    pid = start_link_supervised!({Pachka, sink: sink})
 
-    %{name: name, pid: pid}
-  end
-
-  defp server_name do
-    :"#{Pachka}_#{System.unique_integer()}"
+    %{pid: pid}
   end
 
   defp send_messages(name, count) do
@@ -54,9 +49,9 @@ defmodule PachkaTest do
 
     setup :start_server
 
-    test "collects and sends batches", %{name: name, pid: pid} do
+    test "collects and sends batches", %{pid: pid} do
       for _step <- 1..5 do
-        messages = send_messages(name, 300)
+        messages = send_messages(pid, 300)
 
         send(pid, :batch_timeout)
 
@@ -64,16 +59,16 @@ defmodule PachkaTest do
       end
 
       for _step <- 1..5 do
-        messages = send_messages(name, 500)
+        messages = send_messages(pid, 500)
         assert_receive {:batch, ^messages}
       end
     end
 
-    test "does not start export when table is empty", %{name: name, pid: pid} do
+    test "does not start export when table is empty", %{pid: pid} do
       send(pid, :batch_timeout)
       refute_receive {:batch, _messages}
 
-      messages = send_messages(name, 500)
+      messages = send_messages(pid, 500)
 
       assert_receive {:batch, ^messages}
 
@@ -90,12 +85,12 @@ defmodule PachkaTest do
 
     setup :start_server
 
-    test "blocks writes on overload and recovers after", %{name: name, pid: pid} do
-      first_batch = send_messages(name, 500)
-      other_messages = send_messages(name, 10_000)
+    test "blocks writes on overload and recovers after", %{pid: pid} do
+      first_batch = send_messages(pid, 500)
+      other_messages = send_messages(pid, 10_000)
 
       for i <- 1..10 do
-        assert {:error, :overloaded} = Pachka.send_message(name, i)
+        assert {:error, :overloaded} = Pachka.send_message(pid, i)
       end
 
       stub_with(Pachka.SinkMock, Sinks.SendSink)
@@ -124,15 +119,15 @@ defmodule PachkaTest do
 
       assert_receive :process_recovered
 
-      batch = send_messages(name, 500)
+      batch = send_messages(pid, 500)
       assert_receive {:batch, ^batch}
     end
 
-    test "kills exporting process on timeout without losing messages", %{name: name, pid: pid} do
-      batch_1 = send_messages(name, 500)
+    test "kills exporting process on timeout without losing messages", %{pid: pid} do
+      batch_1 = send_messages(pid, 500)
       refute_receive {:batch, _batch_1}
 
-      batch_2 = send_messages(name, 500)
+      batch_2 = send_messages(pid, 500)
       refute_receive {:batch, _messages}
 
       export_pid = get_export_pid(pid)
@@ -149,9 +144,9 @@ defmodule PachkaTest do
   end
 
   test "returns export error and calculates new retry timeout with it" do
-    %{name: name, pid: pid} = start_server(%{}, Sinks.ErrorSink)
+    pid = start_link_supervised!({Pachka, sink: Sinks.ErrorSink})
 
-    _batch = send_messages(name, 500)
+    _batch = send_messages(pid, 500)
     assert_receive {:retry, 1}
 
     for retry_num <- 2..5 do
@@ -168,20 +163,17 @@ defmodule PachkaTest do
       :ok
     end)
 
-    name = server_name()
     server_value = make_ref()
 
-    start_link_supervised!(
-      {Pachka, name: name, sink: Pachka.SinkMock, server_value: server_value}
-    )
+    pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock, server_value: server_value})
 
     # Passes server_value on regular export
-    batch = send_messages(name, 500)
+    batch = send_messages(pid, 500)
     assert_receive {:batch, ^batch, ^server_value}
 
     # Passes server_value on terminate
-    batch = send_messages(name, 5)
-    Pachka.stop(name)
+    batch = send_messages(pid, 5)
+    Pachka.stop(pid)
     assert_receive {:batch, ^batch, ^server_value}
   end
 
@@ -195,20 +187,16 @@ defmodule PachkaTest do
       retry_num
     end)
 
-    name = server_name()
     server_value = make_ref()
 
-    start_link_supervised!(
-      {Pachka, name: name, sink: Pachka.SinkFullMock, server_value: server_value}
-    )
+    pid = start_link_supervised!({Pachka, sink: Pachka.SinkFullMock, server_value: server_value})
 
-    _batch = send_messages(name, 500)
+    _batch = send_messages(pid, 500)
     assert_receive {:retry, ^server_value}
   end
 
   describe "config" do
     @valid_config [
-      name: Pachka,
       sink: Pachka.SinkMock
     ]
 
@@ -216,6 +204,7 @@ defmodule PachkaTest do
       name: Pachka,
       sink: Pachka.SinkMock,
       server_value: :term,
+      start_link_opts: [],
       max_batch_size: 500,
       critical_batch_size: 10_000,
       max_batch_delay: :timer.seconds(5),
@@ -230,14 +219,6 @@ defmodule PachkaTest do
     test "starts with full valid config" do
       pid = start_link_supervised!({Pachka, @valid_config_full})
       assert Process.alive?(pid)
-    end
-
-    test "raise without name" do
-      config = Keyword.delete(@valid_config, :name)
-
-      assert_raise RuntimeError, ~r/required :name option not found/, fn ->
-        start_link_supervised!({Pachka, config})
-      end
     end
 
     test "raise without sink" do
@@ -256,8 +237,18 @@ defmodule PachkaTest do
       end
     end
 
+    test "is accessible via name" do
+      name = :pachka
+      message = "message"
+      _pid = start_link_supervised!({Pachka, sink: Sinks.SendSink, name: name})
+
+      :ok = Pachka.send_message(name, message)
+      Pachka.stop(name)
+
+      assert_receive {:batch, [^message]}
+    end
+
     parameters = [
-      {"raise on invalid name", :name, 1, "atom"},
       {"raise on invalid sink", :sink, 1, "atom"},
       {"raise on max_batch_size == 0", :max_batch_size, 0, "positive integer"},
       {"raise on max_batch_size < 0", :max_batch_size, -500, "positive integer"},
