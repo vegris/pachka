@@ -1,4 +1,6 @@
 defmodule Pachka.Config do
+  @moduledoc false
+
   schema = [
     name: [type_spec: quote(do: GenServer.name())],
     sink: [type: :atom, required: true, type_spec: quote(do: module())],

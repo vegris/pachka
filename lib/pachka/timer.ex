@@ -1,4 +1,6 @@
 defmodule Pachka.Timer do
+  @moduledoc false
+
   @callback send_after(pid() | atom(), term(), non_neg_integer()) :: reference()
   @callback cancel_timer(reference()) :: non_neg_integer() | false | :ok
 
@@ -8,6 +10,8 @@ defmodule Pachka.Timer do
 end
 
 defmodule Pachka.Timer.Real do
+  @moduledoc false
+
   @behaviour Pachka.Timer
 
   defdelegate send_after(dest, msg, time), to: Process
