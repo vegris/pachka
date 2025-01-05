@@ -12,7 +12,10 @@ defmodule Pachka.MixProject do
       aliases: aliases(),
       dialyzer: [
         flags: ~w[error_handling extra_return missing_return underspecs unmatched_returns]a
-      ]
+      ],
+
+      # Docs
+      name: "Pachka"
     ]
   end
 
@@ -32,6 +35,7 @@ defmodule Pachka.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test, :bench], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test, :bench], runtime: false},
       {:mox, "~> 1.1", only: :test},
+      {:ex_doc, "~> 0.36.1", only: :docs, runtime: false},
       {:ecto_sql, "~> 3.12", only: :bench},
       {:ecto_sqlite3, "~> 0.18", only: :bench}
     ]
