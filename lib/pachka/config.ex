@@ -2,14 +2,59 @@ defmodule Pachka.Config do
   @moduledoc false
 
   schema = [
-    name: [type_spec: quote(do: GenServer.name())],
-    sink: [type: :atom, required: true, type_spec: quote(do: module())],
-    server_value: [type: :any, default: nil, type_spec: quote(do: Pachka.Sink.server_value())],
-    start_link_opts: [type: :keyword_list, type_spec: quote(do: GenServer.options())],
-    max_batch_size: [type: :pos_integer, default: 500],
-    critical_batch_size: [type: :pos_integer, default: 10_000],
-    max_batch_delay: [type: :timeout, default: :timer.seconds(5)],
-    export_timeout: [type: :timeout, default: :timer.seconds(10)]
+    sink: [
+      type: :atom,
+      required: true,
+      type_spec: quote(do: module()),
+      type_doc: "`t:module/0`",
+      doc:
+        "The module that implements the `Pachka.Sink` behavior for processing batched messages."
+    ],
+    name: [
+      type_spec: quote(do: GenServer.name()),
+      type_doc: "`t:GenServer.name/0`",
+      doc:
+        "The name to register the Pachka server process under. See [Name Registration](https://hexdocs.pm/elixir/GenServer.html#module-name-registration) for details."
+    ],
+    server_value: [
+      type: :any,
+      default: nil,
+      type_spec: quote(do: Pachka.Sink.server_value()),
+      type_doc: "`t:Pachka.Sink.server_value/0`",
+      doc:
+        "Value passed by the server process to `Pachka.Sink` callback functions. Can be used to distinguish between different Pachka processes using the same sink module."
+    ],
+    start_link_opts: [
+      type: :keyword_list,
+      type_spec: quote(do: GenServer.options()),
+      type_doc: "`t:GenServer.options/0`",
+      doc: "Options passed to `GenServer.start_link/3`"
+    ],
+    max_batch_size: [
+      type: :pos_integer,
+      default: 500,
+      type_doc: "`t:pos_integer/0`",
+      doc:
+        "Maximum number of messages to accumulate before forcing a batch export. Batches sent to `c:Pachka.Sink.send_batch/2` are guaranteed to be no larger than that size."
+    ],
+    critical_batch_size: [
+      type: :pos_integer,
+      default: 10_000,
+      type_doc: "`t:pos_integer/0`",
+      doc: "Maximum number of messages the server can hold before it starts rejecting new ones."
+    ],
+    max_batch_delay: [
+      type: :timeout,
+      default: :timer.seconds(5),
+      type_doc: "`t:timeout/0`",
+      doc: "Maximum time to wait before exporting a batch."
+    ],
+    export_timeout: [
+      type: :timeout,
+      default: :timer.seconds(10),
+      type_doc: "`t:timeout/0`",
+      doc: "Maximum time allowed for the `c:Pachka.Sink.send_batch/2` to process a batch."
+    ]
   ]
 
   struct_schema = Keyword.drop(schema, [:name, :start_link_opts])

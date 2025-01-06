@@ -19,11 +19,47 @@ defmodule Pachka do
   @type option :: unquote(NimbleOptions.option_typespec(Config.schema()))
   @type options :: [option()]
 
+  @doc """
+  Sends a message to a `Pachka` server process.
+
+  The message will be added to the queue and eventually delivered to the configured sink. 
+  If the server's queue is full, the message will be rejected.
+
+  ## Parameters
+
+    * `name` - The name or pid of the Pachka server process
+    * `message` - The message to be sent
+
+  ## Return values
+
+  Returns `:ok` if the message was successfully queued, or `{:error, :overloaded}` if the server's queue is full.
+
+  ## Examples
+
+      iex> Pachka.send_message(MyPachka, %{event: "user_login"})
+      :ok
+
+      iex> Pachka.send_message(pid, "message") 
+      :ok
+  """
   @spec send_message(GenServer.server(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
     GenServer.call(name, {:message, message})
   end
 
+  @doc """
+  Starts a `Pachka` server process linked to the current process.
+
+  ## Options
+
+  #{NimbleOptions.docs(Config.schema())}
+
+  ## Return values
+
+  If the server is successfully created and initialized, this function returns `{:ok, pid}`, where `pid` is the PID of the server. If a process with the specified server name already exists, this function returns `{:error, {:already_started, pid}}` with the PID of that process.
+
+  Raises a `NimbleOptions.ValidationError` exception if `opts` are not valid.
+  """
   @spec start_link(options()) :: GenServer.on_start()
   def start_link(opts) do
     {config, start_link_opts} = Config.parse_options(opts)
