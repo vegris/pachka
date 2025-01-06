@@ -16,12 +16,15 @@ defmodule Pachka do
 
   @type message :: term()
 
+  @type option :: unquote(NimbleOptions.option_typespec(Config.schema()))
+  @type options :: [option()]
+
   @spec send_message(GenServer.server(), Pachka.message()) :: :ok | {:error, :overloaded}
   def send_message(name, message) do
     GenServer.call(name, {:message, message})
   end
 
-  @spec start_link(Config.options()) :: GenServer.on_start()
+  @spec start_link(options()) :: GenServer.on_start()
   def start_link(opts) do
     {config, start_link_opts} = Config.parse_options(opts)
     GenServer.start_link(__MODULE__, config, start_link_opts)

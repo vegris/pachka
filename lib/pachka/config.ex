@@ -26,14 +26,13 @@ defmodule Pachka.Config do
     |> split_type_union.([], split_type_union)
 
   @type t :: %__MODULE__{unquote_splicing(struct_types)}
-  @type options :: [unquote(NimbleOptions.option_typespec(schema))]
 
   @enforce_keys Keyword.keys(struct_schema)
   defstruct @enforce_keys
 
   @schema NimbleOptions.new!(schema)
 
-  @spec parse_options(options()) :: {t(), GenServer.options()}
+  @spec parse_options(Pachka.options()) :: {t(), GenServer.options()}
   def parse_options(options) do
     {genserver_opts, pachka_opts} =
       options
@@ -49,4 +48,7 @@ defmodule Pachka.Config do
 
     {config, start_link_opts}
   end
+
+  @spec schema :: NimbleOptions.t()
+  def schema, do: @schema
 end
