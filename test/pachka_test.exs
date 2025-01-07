@@ -21,12 +21,6 @@ defmodule PachkaTest do
     on_exit(fn -> Sinks.clear() end)
   end
 
-  defp start_server(_context) do
-    pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
-
-    %{pid: pid}
-  end
-
   defp send_messages(name, count) do
     random = Enum.random(1..10_000)
 
@@ -36,18 +30,27 @@ defmodule PachkaTest do
     end
   end
 
-  defp get_export_pid(server_pid) do
-    %State{state: %State.Exporting{export_pid: export_pid}} = :sys.get_state(server_pid)
+  defp get_export_pid(server) do
+    %State{state: %State.Exporting{export_pid: export_pid}} = :sys.get_state(server)
     export_pid
+  end
+
+  defp trigger_export_timeout(server) do
+    export_pid = get_export_pid(server)
+    monitor_ref = Process.monitor(export_pid)
+    send(server, {:export_timeout, export_pid})
+    assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
+
+    :ok
   end
 
   describe "with basic server and sending sink" do
     setup do
       Mox.stub_with(Pachka.SinkMock, Sinks.SendSink)
-      :ok
-    end
+      pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
 
-    setup :start_server
+      %{pid: pid}
+    end
 
     test "collects and sends batches", %{pid: pid} do
       for _step <- 1..5 do
@@ -55,11 +58,13 @@ defmodule PachkaTest do
 
         send(pid, :batch_timeout)
 
+        # Send non-full batches on timeout
         assert_receive {:batch, ^messages}
       end
 
       for _step <- 1..5 do
         messages = send_messages(pid, 500)
+        # Send full batches when ready
         assert_receive {:batch, ^messages}
       end
     end
@@ -80,10 +85,10 @@ defmodule PachkaTest do
   describe "with basic server and blocked sink" do
     setup do
       stub_with(Pachka.SinkMock, Sinks.BlockSink)
-      :ok
-    end
+      pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
 
-    setup :start_server
+      %{pid: pid}
+    end
 
     test "blocks writes on overload and recovers after", %{pid: pid} do
       first_batch = send_messages(pid, 500)
@@ -95,10 +100,7 @@ defmodule PachkaTest do
 
       stub_with(Pachka.SinkMock, Sinks.SendSink)
 
-      export_pid = get_export_pid(pid)
-      monitor_ref = Process.monitor(export_pid)
-      send(pid, {:export_timeout, export_pid})
-      assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
+      trigger_export_timeout(pid)
 
       self = self()
 
@@ -130,10 +132,7 @@ defmodule PachkaTest do
       batch_2 = send_messages(pid, 500)
       refute_receive {:batch, _messages}
 
-      export_pid = get_export_pid(pid)
-      monitor_ref = Process.monitor(export_pid)
-      send(pid, {:export_timeout, export_pid})
-      assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
+      trigger_export_timeout(pid)
 
       stub_with(Pachka.SinkMock, Sinks.SendSink)
 
@@ -195,6 +194,58 @@ defmodule PachkaTest do
 
       _batch = send_messages(pid, 500)
       assert_receive {:retry, ^server_value}
+    end
+  end
+
+  describe "termination" do
+    setup do
+      stub_with(Pachka.SinkMock, Sinks.BlockSink)
+      pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
+
+      %{pid: pid}
+    end
+
+    test "drains messages on termination", %{pid: pid} do
+      batches =
+        for _ <- 1..3 do
+          send_messages(pid, 500)
+        end
+
+      trigger_export_timeout(pid)
+
+      stub_with(Pachka.SinkMock, Sinks.SendSink)
+
+      task = Task.async(fn -> Pachka.stop(pid, 1_000) end)
+      # Give some time to enter terminate callback
+      refute_receive _
+      send(pid, :retry_timeout)
+
+      Task.await(task)
+
+      for batch <- batches do
+        assert_receive {:batch, ^batch}
+      end
+    end
+
+    test "lets ongoing export finish normally", %{pid: pid} do
+      first_batch = send_messages(pid, 500)
+      second_batch = send_messages(pid, 500)
+
+      export_pid = get_export_pid(pid)
+
+      stub_with(Pachka.SinkMock, Sinks.SendSink)
+
+      task = Task.async(fn -> Pachka.stop(pid, 1_000) end)
+      # Give some time to enter terminate callback
+      refute_receive _
+
+      assert Process.alive?(export_pid)
+
+      send(export_pid, :unblock)
+      assert_receive {:unblocked, ^first_batch}
+      assert_receive {:batch, ^second_batch}
+
+      Task.await(task)
     end
   end
 

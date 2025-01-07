@@ -179,27 +179,31 @@ defmodule Pachka do
   end
 
   @impl true
-  def terminate(reason, %S{state: %Idle{}} = state) when State.is_empty(state), do: reason
+  def terminate(_reason, %S{} = state), do: drain_messages(state)
 
-  def terminate(reason, %S{state: %Idle{}} = state) do
-    sink = state.config.sink
-    server_value = state.config.server_value
+  defp drain_messages(%S{state: %Idle{}} = state) when State.is_empty(state), do: state
 
-    {batch, _state} = State.take_batch(state)
-
-    case sink.send_batch(batch, server_value) do
-      :ok -> reason
-      {:error, send_reason} -> send_reason
-    end
+  defp drain_messages(%S{state: %Idle{}} = state) do
+    state |> to_exporting() |> drain_messages()
   end
 
-  def terminate(reason, %S{state: %Exporting{}} = state) do
+  defp drain_messages(%S{state: %Exporting{}} = state) do
     state =
       receive do
+        {:export_timeout, pid} -> handle_export_timeout(state, pid)
         {:EXIT, pid, reason} -> handle_process_exit(state, pid, reason)
       end
 
-    terminate(reason, state)
+    drain_messages(state)
+  end
+
+  defp drain_messages(%S{state: %RetryBackoff{}} = state) do
+    state =
+      receive do
+        :retry_timeout -> to_exporting(state)
+      end
+
+    drain_messages(state)
   end
 
   defp to_idle(%S{state: %struct{}} = state) when struct in [Idle, Exporting] do

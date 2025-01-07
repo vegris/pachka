@@ -15,8 +15,13 @@ defmodule Test.Support.Sinks do
     @behaviour Pachka.Sink
 
     @impl true
-    def send_batch(_message, _server_value) do
-      Process.sleep(:infinity)
+    def send_batch(messages, _server_value) do
+      receive do
+        :unblock -> :ok
+      end
+
+      send(Sinks.receiver_pid(), {:unblocked, messages})
+      :ok
     end
   end
 
