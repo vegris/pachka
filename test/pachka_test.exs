@@ -21,8 +21,8 @@ defmodule PachkaTest do
     on_exit(fn -> Sinks.clear() end)
   end
 
-  defp start_server(_context, sink \\ Pachka.SinkMock) do
-    pid = start_link_supervised!({Pachka, sink: sink})
+  defp start_server(_context) do
+    pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
 
     %{pid: pid}
   end
@@ -41,7 +41,7 @@ defmodule PachkaTest do
     export_pid
   end
 
-  describe "SendSink" do
+  describe "with basic server and sending sink" do
     setup do
       Mox.stub_with(Pachka.SinkMock, Sinks.SendSink)
       :ok
@@ -77,7 +77,7 @@ defmodule PachkaTest do
     end
   end
 
-  describe "BlockSink" do
+  describe "with basic server and blocked sink" do
     setup do
       stub_with(Pachka.SinkMock, Sinks.BlockSink)
       :ok
@@ -143,94 +143,98 @@ defmodule PachkaTest do
     end
   end
 
-  test "returns export error and calculates new retry timeout with it" do
-    pid = start_link_supervised!({Pachka, sink: Sinks.ErrorSink})
+  describe "with custom server" do
+    test "returns export error and calculates new retry timeout with it" do
+      pid = start_link_supervised!({Pachka, sink: Sinks.ErrorSink})
 
-    _batch = send_messages(pid, 500)
-    assert_receive {:retry, 1}
+      _batch = send_messages(pid, 500)
+      assert_receive {:retry, 1}
 
-    for retry_num <- 2..5 do
-      send(pid, :retry_timeout)
-      assert_receive {:retry, ^retry_num}
+      for retry_num <- 2..5 do
+        send(pid, :retry_timeout)
+        assert_receive {:retry, ^retry_num}
+      end
+    end
+
+    test "passes server value to send_batch function" do
+      test_pid = self()
+
+      stub(Pachka.SinkMock, :send_batch, fn messages, server_value ->
+        send(test_pid, {:batch, messages, server_value})
+        :ok
+      end)
+
+      server_value = make_ref()
+
+      pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock, server_value: server_value})
+
+      # Passes server_value on regular export
+      batch = send_messages(pid, 500)
+      assert_receive {:batch, ^batch, ^server_value}
+
+      # Passes server_value on terminate
+      batch = send_messages(pid, 5)
+      Pachka.stop(pid)
+      assert_receive {:batch, ^batch, ^server_value}
+    end
+
+    test "passes server value to retry_timeout function" do
+      test_pid = self()
+
+      Pachka.SinkFullMock
+      |> stub(:send_batch, fn _messages, _server_value -> {:error, :failed} end)
+      |> stub(:retry_timeout, fn retry_num, _failure_reason, server_value ->
+        send(test_pid, {:retry, server_value})
+        retry_num
+      end)
+
+      server_value = make_ref()
+
+      pid =
+        start_link_supervised!({Pachka, sink: Pachka.SinkFullMock, server_value: server_value})
+
+      _batch = send_messages(pid, 500)
+      assert_receive {:retry, ^server_value}
     end
   end
 
-  test "passes server value to send_batch function" do
-    test_pid = self()
+  describe "config validation" do
+    setup do
+      %{
+        valid_config: [sink: Pachka.SinkMock],
+        valid_config_full: [
+          name: Pachka,
+          sink: Pachka.SinkMock,
+          server_value: :term,
+          start_link_opts: [],
+          max_batch_size: 500,
+          critical_batch_size: 10_000,
+          max_batch_delay: :timer.seconds(5),
+          export_timeout: :timer.seconds(10)
+        ]
+      }
+    end
 
-    stub(Pachka.SinkMock, :send_batch, fn messages, server_value ->
-      send(test_pid, {:batch, messages, server_value})
-      :ok
-    end)
-
-    server_value = make_ref()
-
-    pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock, server_value: server_value})
-
-    # Passes server_value on regular export
-    batch = send_messages(pid, 500)
-    assert_receive {:batch, ^batch, ^server_value}
-
-    # Passes server_value on terminate
-    batch = send_messages(pid, 5)
-    Pachka.stop(pid)
-    assert_receive {:batch, ^batch, ^server_value}
-  end
-
-  test "passes server value to retry_timeout function" do
-    test_pid = self()
-
-    Pachka.SinkFullMock
-    |> stub(:send_batch, fn _messages, _server_value -> {:error, :failed} end)
-    |> stub(:retry_timeout, fn retry_num, _failure_reason, server_value ->
-      send(test_pid, {:retry, server_value})
-      retry_num
-    end)
-
-    server_value = make_ref()
-
-    pid = start_link_supervised!({Pachka, sink: Pachka.SinkFullMock, server_value: server_value})
-
-    _batch = send_messages(pid, 500)
-    assert_receive {:retry, ^server_value}
-  end
-
-  describe "config" do
-    @valid_config [
-      sink: Pachka.SinkMock
-    ]
-
-    @valid_config_full [
-      name: Pachka,
-      sink: Pachka.SinkMock,
-      server_value: :term,
-      start_link_opts: [],
-      max_batch_size: 500,
-      critical_batch_size: 10_000,
-      max_batch_delay: :timer.seconds(5),
-      export_timeout: :timer.seconds(10)
-    ]
-
-    test "starts with valid config" do
-      pid = start_link_supervised!({Pachka, @valid_config})
+    test "starts with valid config", ctx do
+      pid = start_link_supervised!({Pachka, ctx.valid_config})
       assert Process.alive?(pid)
     end
 
-    test "starts with full valid config" do
-      pid = start_link_supervised!({Pachka, @valid_config_full})
+    test "starts with full valid config", ctx do
+      pid = start_link_supervised!({Pachka, ctx.valid_config_full})
       assert Process.alive?(pid)
     end
 
-    test "raise without sink" do
-      config = Keyword.delete(@valid_config, :sink)
+    test "raise without sink", ctx do
+      config = Keyword.delete(ctx.valid_config, :sink)
 
       assert_raise RuntimeError, ~r/required :sink option not found/, fn ->
         start_link_supervised!({Pachka, config})
       end
     end
 
-    test "raise on unknown key" do
-      config = Keyword.put(@valid_config, :unknown, :value)
+    test "raise on unknown key", ctx do
+      config = Keyword.put(ctx.valid_config, :unknown, :value)
 
       assert_raise RuntimeError, ~r/unknown options \[:unknown\]/, fn ->
         start_link_supervised!({Pachka, config})
@@ -260,8 +264,8 @@ defmodule PachkaTest do
     ]
 
     for {name, key, value, expected} <- parameters do
-      test name do
-        config = Keyword.put(@valid_config, unquote(key), unquote(value))
+      test name, ctx do
+        config = Keyword.put(ctx.valid_config, unquote(key), unquote(value))
 
         error =
           "invalid value for :#{unquote(key)} option: expected #{unquote(expected)}, got: #{unquote(value)}"
