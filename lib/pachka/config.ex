@@ -22,7 +22,7 @@ defmodule Pachka.Config do
       type_spec: quote(do: Pachka.Sink.server_value()),
       type_doc: "`t:Pachka.Sink.server_value/0`",
       doc:
-        "Value passed by the server process to `Pachka.Sink` callback functions. Can be used to distinguish between different Pachka processes using the same sink module."
+        "Value passed by the server process to `Pachka.Sink` callback functions. Can be used to distinguish between different Pachka processes using the same sink module or to store server-specific configuration."
     ],
     start_link_opts: [
       type: :keyword_list,
