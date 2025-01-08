@@ -1,4 +1,47 @@
 defmodule Pachka do
+  @moduledoc """
+  Pachka is a message batching and delivery system for Elixir applications.
+
+  It provides a reliable way to collect messages and deliver them in batches to configurable destinations.
+  Messages are buffered until either the batch size limit is reached or the batch timeout occurs.
+  Failed deliveries are automatically retried with configurable backoff strategies.
+
+  ## Features
+
+    * Configurable batch sizes and timeouts
+    * Customizable message sinks for different delivery targets
+    * Automatic retries with customizable backoff
+    * Overload protection with queue size limits
+    * Graceful shutdown with message draining
+
+  ## Example
+
+      defmodule MyApp.MessageSink do
+        @behaviour Pachka.Sink
+        
+        @impl true
+        def send_batch(messages, _server_value) do
+          # Process messages in batch
+          :ok
+        end
+      end
+
+      # Start Pachka server
+      {:ok, pid} = Pachka.start_link(
+        name: MyPachka,
+        sink: MyApp.MessageSink,
+        max_batch_size: 100,
+        max_batch_delay: :timer.seconds(1)
+      )
+
+      # Send messages
+      :ok = Pachka.send_message(MyPachka, %{event: "user_login"})
+      :ok = Pachka.send_message(MyPachka, %{event: "page_view"})
+
+  The messages will be collected and delivered to the sink in batches based on the configured
+  batch size and delay parameters.
+  """
+
   use GenServer
 
   alias Pachka.Config
