@@ -222,7 +222,39 @@ defmodule Pachka do
   end
 
   @impl true
-  def terminate(_reason, %S{} = state), do: drain_messages(state)
+  def terminate(_reason, %S{config: %Config{} = config} = state) do
+    if function_exported?(config.sink, :drain_on_terminate, 3) do
+      unexported_batch = finish_exporting(state)
+      messages = unexported_batch ++ Enum.reverse(state.queue)
+      config.sink.drain_on_terminate(messages, config.max_batch_size, config.server_value)
+    else
+      drain_messages(state)
+    end
+
+    :ok
+  end
+
+  defp finish_exporting(%S{state: %Exporting{} = e} = state) do
+    receive do
+      {:export_timeout, pid} ->
+        state
+        |> handle_export_timeout(pid)
+        |> finish_exporting()
+
+      {:EXIT, pid, reason} ->
+        Logger.debug("Received process EXIT message", pid: pid, reason: reason)
+
+        _ = @timer.cancel_timer(e.export_timer)
+
+        if reason == :normal do
+          []
+        else
+          e.export_batch
+        end
+    end
+  end
+
+  defp finish_exporting(%S{}), do: []
 
   defp drain_messages(%S{state: %Idle{}} = state) when State.is_empty(state), do: state
 

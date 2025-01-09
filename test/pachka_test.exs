@@ -155,6 +155,18 @@ defmodule PachkaTest do
       end
     end
 
+    test "does not crash on export process exception" do
+      stub(Pachka.SinkMock, :send_batch, fn _messages, _server_value -> raise "Error" end)
+      pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
+
+      batch = send_messages(pid, 500)
+      refute_receive _
+
+      stub_with(Pachka.SinkMock, Sinks.SendSink)
+      send(pid, :retry_timeout)
+      assert_receive {:batch, ^batch}
+    end
+
     test "passes server value to send_batch function" do
       test_pid = self()
 
@@ -197,7 +209,7 @@ defmodule PachkaTest do
     end
   end
 
-  describe "termination" do
+  describe "basic termination" do
     setup do
       stub_with(Pachka.SinkMock, Sinks.BlockSink)
       pid = start_link_supervised!({Pachka, sink: Pachka.SinkMock})
@@ -247,6 +259,24 @@ defmodule PachkaTest do
 
       Task.await(task)
     end
+  end
+
+  test "uses drain_on_terminate when available" do
+    server_value = make_ref()
+    pid = start_link_supervised!({Pachka, sink: Sinks.DrainSink, server_value: server_value})
+
+    batches =
+      for _ <- 1..3 do
+        send_messages(pid, 500)
+      end
+
+    task = Task.async(fn -> Pachka.stop(pid) end)
+    trigger_export_timeout(pid)
+
+    assert_receive {:drained, messages, 500, ^server_value}
+    assert Enum.concat(batches) == messages
+
+    Task.await(task)
   end
 
   describe "config validation" do
