@@ -259,7 +259,7 @@ defmodule PachkaTest do
           server_value: :term,
           start_link_opts: [],
           max_batch_size: 500,
-          critical_batch_size: 10_000,
+          critical_queue_size: 10_000,
           max_batch_delay: :timer.seconds(5),
           export_timeout: :timer.seconds(10)
         ]
@@ -307,8 +307,8 @@ defmodule PachkaTest do
       {"raise on invalid sink", :sink, 1, "atom"},
       {"raise on max_batch_size == 0", :max_batch_size, 0, "positive integer"},
       {"raise on max_batch_size < 0", :max_batch_size, -500, "positive integer"},
-      {"raise on critical_batch_size == 0", :critical_batch_size, 0, "positive integer"},
-      {"raise on critical_batch_size < 0", :critical_batch_size, -500, "positive integer"},
+      {"raise on critical_queue_size == 0", :critical_queue_size, 0, "positive integer"},
+      {"raise on critical_queue_size < 0", :critical_queue_size, -500, "positive integer"},
       {"raise on max_batch_delay < 0", :max_batch_delay, -500,
        "non-negative integer or :infinity"},
       {"raise on export_timeout < 0", :export_timeout, -500, "non-negative integer or :infinity"}

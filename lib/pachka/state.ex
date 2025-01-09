@@ -13,7 +13,7 @@ defmodule Pachka.State do
 
   defguard is_empty(state) when state.queue_length == 0
   defguard is_batch_ready(state) when state.queue_length >= state.config.max_batch_size
-  defguard is_full(state) when state.queue_length >= state.config.critical_batch_size
+  defguard is_full(state) when state.queue_length >= state.config.critical_queue_size
 
   @spec add_message(t(), Pachka.message()) :: t()
   def add_message(%__MODULE__{} = state, message) do

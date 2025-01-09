@@ -37,7 +37,7 @@ defmodule Pachka.Config do
       doc:
         "Maximum number of messages to accumulate before forcing a batch export. Batches sent to `c:Pachka.Sink.send_batch/2` are guaranteed to be no larger than that size."
     ],
-    critical_batch_size: [
+    critical_queue_size: [
       type: :pos_integer,
       default: 10_000,
       type_doc: "`t:pos_integer/0`",
