@@ -259,6 +259,28 @@ defmodule PachkaTest do
 
       Task.await(task)
     end
+
+    test "aborts ongoing export on timeout", %{pid: pid} do
+      batch = send_messages(pid, 500)
+
+      # Can't use trigger_export_timeout because we need to get export pid
+      # before stopping the server and trigger timeout after
+      export_pid = get_export_pid(pid)
+      monitor_ref = Process.monitor(export_pid)
+
+      task = Task.async(fn -> Pachka.stop(pid, 1_000) end)
+      # Give some time to enter terminate callback
+      refute_receive _
+
+      send(pid, {:export_timeout, export_pid})
+      assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
+
+      stub_with(Pachka.SinkMock, Sinks.SendSink)
+      send(pid, :retry_timeout)
+      assert_receive {:batch, ^batch}
+
+      Task.await(task)
+    end
   end
 
   test "uses drain_on_terminate when available" do
@@ -270,13 +292,94 @@ defmodule PachkaTest do
         send_messages(pid, 500)
       end
 
+    # Can't use trigger_export_timeout because we need to get export pid
+    # before stopping the server and trigger timeout after
+    export_pid = get_export_pid(pid)
+    monitor_ref = Process.monitor(export_pid)
+
     task = Task.async(fn -> Pachka.stop(pid) end)
-    trigger_export_timeout(pid)
+    # Give some time to enter terminate callback
+    refute_receive _
+
+    send(pid, {:export_timeout, export_pid})
+    assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :killed}
 
     assert_receive {:drained, messages, 500, ^server_value}
     assert Enum.concat(batches) == messages
 
     Task.await(task)
+  end
+
+  describe "timeouts in wrong states" do
+    import ExUnit.CaptureLog
+
+    setup do
+      current_level = Logger.level()
+      on_exit(fn -> Logger.configure(level: current_level) end)
+      Logger.configure(level: :warning)
+    end
+
+    test "batch timeout when exporting" do
+      pid = start_link_supervised!({Pachka, sink: Sinks.BlockSink})
+
+      batch = send_messages(pid, 500)
+      export_pid = get_export_pid(pid)
+
+      log =
+        capture_log(fn ->
+          send(pid, :batch_timeout)
+
+          send(export_pid, :unblock)
+          assert_receive {:unblocked, ^batch}
+          Pachka.stop(pid, 1_000)
+        end)
+
+      assert log =~ "Received batch timeout in wrong state"
+    end
+
+    test "export timeout for old pid" do
+      pid = start_link_supervised!({Pachka, sink: Sinks.BlockSink})
+
+      batch = send_messages(pid, 500)
+
+      old_export_pid = get_export_pid(pid)
+      trigger_export_timeout(pid)
+      send(pid, :retry_timeout)
+
+      log =
+        capture_log(fn ->
+          send(pid, {:export_timeout, old_export_pid})
+
+          new_export_pid = get_export_pid(pid)
+          task = Task.async(fn -> Pachka.stop(pid, 1_000) end)
+
+          send(new_export_pid, :unblock)
+          assert_receive {:unblocked, ^batch}
+          Task.await(task)
+        end)
+
+      assert log =~ "Received export timeout for old process"
+    end
+
+    test "export timeout when idle" do
+      pid = start_link_supervised!({Pachka, sink: Sinks.BlockSink})
+
+      batch = send_messages(pid, 500)
+      export_pid = get_export_pid(pid)
+      monitor_ref = Process.monitor(export_pid)
+
+      send(export_pid, :unblock)
+      assert_receive {:unblocked, ^batch}
+      assert_receive {:DOWN, ^monitor_ref, :process, ^export_pid, :normal}
+
+      log =
+        capture_log(fn ->
+          send(pid, {:export_timeout, export_pid})
+          Pachka.stop(pid, 1_000)
+        end)
+
+      assert log =~ "Received export timeout in wrong state"
+    end
   end
 
   describe "config validation" do
