@@ -36,6 +36,7 @@ defmodule Pachka.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test, :bench], runtime: false},
       {:mox, "~> 1.1", only: :test},
       {:ex_doc, "~> 0.36.1", only: :docs, runtime: false},
+      {:benchee, "~> 1.0", only: :bench},
       {:ecto_sql, "~> 3.12", only: :bench},
       {:ecto_sqlite3, "~> 0.18", only: :bench}
     ]

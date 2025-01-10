@@ -43,47 +43,71 @@ defmodule Pachka.Benchmarks.SQLite do
   end
 
   def run do
-    with_setup(&run_single/0)
-    with_setup(&run_pachka/0)
+    Benchee.run(
+      %{
+        "single insert" => &run_single/0,
+        "manual batch insert" => &run_batch/0,
+        "pachka batch insert" => &run_pachka/0
+      },
+      before_scenario: fn input ->
+        setup_db()
+        input
+      end,
+      after_scenario: fn _input -> teardown_db() end
+    )
   end
 
-  defp with_setup(fun) do
-    config = Repo.config()
-
-    :ok = Repo.__adapter__().storage_up(config)
+  defp setup_db do
+    :ok = Repo.__adapter__().storage_up(Repo.config())
     {:ok, _} = Repo.start_link()
-
     _ = Ecto.Migrator.run(Repo, [{0, Migration}], :up, all: true)
-
-    fun.()
-
-    Repo.stop()
-    _ = Repo.__adapter__().storage_down(config)
 
     :ok
   end
 
-  defp run_single do
-    :timer.tc(fn ->
-      for i <- 1..10_000 do
-        Repo.insert!(%Post{title: "Post #{i}"})
-      end
+  defp teardown_db do
+    Repo.stop()
+    _ = Repo.__adapter__().storage_down(Repo.config())
 
+    :ok
+  end
+
+  @messages 1..10_000
+  @batch_size 500
+
+  defp run_single do
+    for i <- @messages do
+      Repo.insert!(%Post{title: "Post #{i}"})
+    end
+
+    :ok
+  end
+
+  defp run_batch do
+    @messages
+    |> Enum.chunk_every(@batch_size)
+    |> Enum.each(fn batch ->
+      posts =
+        Enum.map(batch, fn title ->
+          %{
+            title: "Post #{title}",
+            inserted_at: {:placeholder, :now},
+            updated_at: {:placeholder, :now}
+          }
+        end)
+
+      _ = Repo.insert_all(Post, posts, placeholders: %{now: DateTime.utc_now()})
       :ok
     end)
-    |> dbg()
   end
 
   defp run_pachka do
-    {:ok, _pid} = Pachka.start_link(name: Pachka, sink: Sink)
+    {:ok, pid} = Pachka.start_link(sink: Sink, max_batch_size: @batch_size)
 
-    :timer.tc(fn ->
-      for i <- 1..10_000 do
-        :ok = Pachka.send_message(Pachka, "Post #{i}")
-      end
+    for i <- @messages do
+      :ok = Pachka.send_message(pid, "Post #{i}")
+    end
 
-      Pachka.stop(Pachka)
-    end)
-    |> dbg()
+    Pachka.stop(pid)
   end
 end
