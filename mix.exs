@@ -38,7 +38,8 @@ defmodule Pachka.MixProject do
       {:ex_doc, "~> 0.36.1", only: :docs, runtime: false},
       {:benchee, "~> 1.0", only: :bench},
       {:ecto_sql, "~> 3.12", only: :bench},
-      {:ecto_sqlite3, "~> 0.18", only: :bench}
+      {:ecto_sqlite3, "~> 0.18", only: :bench},
+      {:brod, "~> 4.3", only: :bench}
     ]
   end
 
