@@ -57,9 +57,19 @@ defmodule Pachka do
 
   @timer Pachka.Timer.implementation()
 
+  @typedoc """
+  A message that can be sent to a `Pachka` server process.
+  """
   @type message :: term()
 
+  @typedoc """
+  Option values used by the `start_link/1` function.
+  """
   @type option :: unquote(NimbleOptions.option_typespec(Config.schema()))
+
+  @typedoc """
+  Options used by the `start_link/1` function.
+  """
   @type options :: [option()]
 
   @doc """
@@ -99,7 +109,8 @@ defmodule Pachka do
 
   ## Return values
 
-  If the server is successfully created and initialized, this function returns `{:ok, pid}`, where `pid` is the PID of the server. If a process with the specified server name already exists, this function returns `{:error, {:already_started, pid}}` with the PID of that process.
+  If the server is successfully created and initialized, this function returns `{:ok, pid}`, where `pid` is the PID of the server.
+  If a process with the specified server name already exists, this function returns `{:error, {:already_started, pid}}` with the PID of that process.
 
   Raises a `NimbleOptions.ValidationError` exception if `opts` are not valid.
   """
