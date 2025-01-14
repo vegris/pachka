@@ -40,6 +40,64 @@ defmodule Pachka do
 
   The messages will be collected and delivered to the sink in batches based on the configured
   batch size and delay parameters.
+
+  ## Shutdown
+
+  When a Pachka server receives a shutdown request (via `Pachka.stop/2` or from its parent `Supervisor`), it enters termination mode. During termination, Pachka stops accepting new messages and processes all accumulated messages.
+
+  If `Pachka.Sink` does not implement `c:Pachka.Sink.drain_on_terminate/3`, Pachka processes accumulated messages using its standard operation flow - dividing the queue into batches and invoking `c:Pachka.Sink.send_batch/2` for each batch. On batch failure, Pachka initiates retries with intervals determined by `c:Pachka.Sink.retry_timeout/3`.
+
+  If `Pachka.Sink` implements `c:Pachka.Sink.drain_on_terminate/3`, the Pachka server transfers control to this function along with all accumulated messages.
+
+  > #### `c:Pachka.Sink.drain_on_terminate/3` {: .tip}
+  > You can skip implementing `c:Pachka.Sink.drain_on_terminate/3` when export failure risk is minimal - for instance, when storing messages in an SQLite database on the local machine's disk.
+  > 
+  > For all other scenarios, implement `c:Pachka.Sink.drain_on_terminate/3` with a fallback system to prevent message loss during network outages or target system failures.
+
+  ### In-flight export
+
+  When a Pachka server enters termination mode during an ongoing export, it allows this export to complete normally within the time defined by `export_timeout`. This is a deliberate decision based on the notion that the intersection of two normal operations - batch export and process termination should not result in an abnormal operation - export cancellation before `export_timeout` expires.
+
+  If the in-flight export fails, unsent messages are returned to the queue and the entire queue is passed to `c:Pachka.Sink.drain_on_terminate/3`.
+
+  ### Shutdown timeout
+
+  Pachka does not define a time limit for termination mode. The actual termination time limit is set by the requesting system - either through the `timeout` parameter of `Pachka.stop/2` or via the `:shutdown` option when launched through a `Supervisor` (see [Shutdown values (:shutdown)](https://hexdocs.pm/elixir/Supervisor.html#module-shutdown-values-shutdown)).
+
+  > #### Set the termination timeout based on the worst-case scenario {: .tip}
+  > - messages to send = `critical_queue_size` messages in queue + `max_batch_size` unsent messages from in-flight export
+  > - time to send them = `shutdown timeout` - `export_timeout` duration spent by the failed export
+
+  ## Startup and shutdown order
+
+  When using Pachka in your supervision tree, the order of children is important for proper startup and shutdown behavior:
+
+  1. Start the sink system first
+  2. Start Pachka servers
+  3. Start message producers last
+
+  This ordering ensures:
+
+  - During startup: The sink system is ready to receive messages before Pachka begins processing
+  - During shutdown: Message producers stop first, then Pachka drains remaining messages, and finally the sink system terminates
+
+  Example configuration:
+
+      children = [
+        # 1. Sink system (e.g. database connection)
+        MyApp.Repo,
+        
+        # 2. Pachka server
+        {Pachka, name: MyPachka, sink: MyApp.MessageSink},
+        
+        # 3. Message producers
+        MyApp.UserTracker,
+        MyApp.MetricsCollector
+      ]
+
+      Supervisor.start_link(children, strategy: :one_for_one)
+
+  This order prevents message loss during system startup and shutdown since supervisors start children sequentially and shut them down in reverse order (see [Start and shutdown](https://hexdocs.pm/elixir/Supervisor.html#module-start-and-shutdown)).
   """
 
   use GenServer
@@ -120,6 +178,11 @@ defmodule Pachka do
     GenServer.start_link(__MODULE__, config, start_link_opts)
   end
 
+  @doc """
+  Synchronously stops the server.
+
+  Refer to the [Shutdown](#module-shutdown) section for information about server termination.
+  """
   @spec stop(GenServer.server(), timeout()) :: :ok
   def stop(server, timeout \\ :infinity) do
     GenServer.stop(server, :normal, timeout)
