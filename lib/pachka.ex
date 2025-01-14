@@ -1,6 +1,6 @@
 defmodule Pachka do
   @moduledoc """
-  Pachka is a message batching and delivery system for Elixir applications.
+  Pachka is a message batching library for Elixir applications.
 
   It provides a reliable way to collect messages and deliver them in batches to configurable destinations.
   Messages are buffered until either the batch size limit is reached or the batch timeout occurs.
