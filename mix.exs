@@ -15,7 +15,10 @@ defmodule Pachka.MixProject do
       ],
 
       # Docs
-      name: "Pachka"
+      name: "Pachka",
+      docs: [
+        main: "Pachka"
+      ]
     ]
   end
 
