@@ -50,5 +50,31 @@ jobs:
     - name: Run linters
       run: mix do format --check-formatted, compile --warnings-as-errors, credo
 
+    - name: Restore PLT cache
+      id: plt_cache
+      uses: actions/cache/restore@v4
+      with:
+        key: plt-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+        restore-keys: plt-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-
+        path: priv/plts
+        
+    - name: Create PLTs
+      if: steps.plt_cache.outputs.cache-hit != 'true'
+      run: mix dialyzer --plt
+       
+    - name: Save PLT cache
+      id: plt_cache_save
+      uses: actions/cache/save@v4
+      if: steps.plt_cache.outputs.cache-hit != 'true'
+      with:
+        key: plt-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+        path: priv/plts
+
+    - name: Run dialyzer
+      # Two formats are included for ease of debugging and it is lightly recommended to use both, see https://github.com/jeremyjh/dialyxir/issues/530 for reasoning
+      # --format github is helpful to print the warnings in a way that GitHub understands and can place on the /files page of a PR
+      # --format dialyxir allows the raw GitHub actions logs to be useful because they have the full warning printed
+      run: mix dialyzer --format github --format dialyxir
+
     - name: Run tests
       run: mix test --warnings-as-errors

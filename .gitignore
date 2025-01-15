@@ -27,3 +27,6 @@ pachka-*.tar
 
 # Language server directory
 /.elixir_ls/
+
+# Dialyzer PLTs
+/priv/plts/

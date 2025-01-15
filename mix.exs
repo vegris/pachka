@@ -11,6 +11,8 @@ defmodule Pachka.MixProject do
       deps: deps(),
       aliases: aliases(),
       dialyzer: [
+        plt_core_path: "priv/plts",
+        plt_local_path: "priv/plts",
         flags: ~w[error_handling extra_return missing_return underspecs unmatched_returns]a
       ],
 
