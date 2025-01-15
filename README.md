@@ -1,5 +1,7 @@
 # Pachka
 
+[![Hex.pm Version](https://img.shields.io/hexpm/v/pachka)](https://hex.pm/packages/pachka)
+[![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/pachka/)
 [![CI](https://github.com/vegris/pachka/actions/workflows/ci.yml/badge.svg)](https://github.com/vegris/pachka/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/vegris/pachka/badge.svg?branch=main)](https://coveralls.io/github/vegris/pachka?branch=main)
 
