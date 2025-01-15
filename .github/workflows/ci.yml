@@ -76,5 +76,11 @@ jobs:
       # --format dialyxir allows the raw GitHub actions logs to be useful because they have the full warning printed
       run: mix dialyzer --format github --format dialyxir
 
+    # Run tests normally first to catch possible warnings
     - name: Run tests
       run: mix test --warnings-as-errors
+      
+    - name: Run tests with coverage
+      run: mix coveralls.github
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -10,6 +10,7 @@ defmodule Pachka.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
+      test_coverage: [tool: ExCoveralls],
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_local_path: "priv/plts",
@@ -40,6 +41,7 @@ defmodule Pachka.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test, :bench], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test, :bench], runtime: false},
       {:mox, "~> 1.1", only: :test},
+      {:excoveralls, "~> 0.18.3", only: :test},
       {:ex_doc, "~> 0.36.1", only: :docs, runtime: false},
       {:benchee, "~> 1.0", only: :bench},
       {:ecto_sql, "~> 3.12", only: :bench},
