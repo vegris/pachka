@@ -47,5 +47,8 @@ jobs:
           _build
         key: ${{ steps.restore-mix-deps-cache.outputs.cache-primary-key }}
 
+    - name: Run linters
+      run: mix do format --check-formatted, compile --warnings-as-errors, credo
+
     - name: Run tests
-      run: mix test
+      run: mix test --warnings-as-errors
