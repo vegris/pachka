@@ -1,5 +1,8 @@
 # Pachka
 
+[![CI](https://github.com/vegris/pachka/actions/workflows/ci.yml/badge.svg)](https://github.com/vegris/pachka/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/vegris/pachka/badge.svg?branch=main)](https://coveralls.io/github/vegris/pachka?branch=main)
+
 Pachka is a message batching library for Elixir.
 
 It provides a reliable way to collect messages and deliver them in batches to configurable destinations.
